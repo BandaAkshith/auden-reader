@@ -10,6 +10,8 @@ import { usePreference } from './readerPreferences'
 import { AccountPage } from './AccountPage'
 import { PreferencesPage, layouts, papers, typefaces, readingRates } from './PreferencesPage'
 import { profile, openLibraryAfterAccountChange, signOut } from './accounts'
+import { constellationOptions, ConstellationAvatar, type Constellation } from './ProfileAppearance'
+import { qwenVoices, voiceEngineLabels, voiceEngines, type QwenVoice } from './qwen'
 import { dayKey, loadInsights, summarizeInsights, useReadingSession } from './insights'
 
 const OriginalPdf = lazy(() => import('./OriginalPdf'))
@@ -55,6 +57,7 @@ export function App() {
   const isUtilityView = accountView || showingPreferences
   function logout() { signOut(); openLibraryAfterAccountChange() }
   const [dark, setDark] = usePreference<boolean>('dark-mode', false)
+  const [constellation, setConstellation] = usePreference<Constellation>('constellation', 'Aries', constellationOptions)
   useEffect(() => { document.documentElement.dataset.theme = dark ? 'dark' : 'light' }, [dark])
   const [books, setBooks] = useState<Book[]>([])
   const [loaded, setLoaded] = useState(false)
@@ -207,7 +210,7 @@ export function App() {
       <div className="masthead-end"><span><LockKeyhole size={14} /> Device library</span>
         <button className="icon-button theme-button" aria-label={dark ? 'Switch to light mode' : 'Switch to dark mode'} title={dark ? 'Light mode' : 'Dark mode'} onClick={() => setDark(!dark)}>{dark ? <Sun size={19} /> : <Moon size={19} />}</button>
         <a className="icon-button theme-button" aria-label="Preferences" title="Preferences" href="#preferences"><Settings2 size={18} /></a>
-        {profile ? <a className="icon-button theme-button" href="#preferences" aria-label={`Account for ${profile.name}`} title={profile.name}><UserRound size={18} /></a>
+        {profile ? <a className="profile-link" href="#preferences" aria-label={`Profile for ${profile.name}`} title={profile.name}><ConstellationAvatar sign={constellation} /></a>
           : <a className="secondary compact account-link" href="#login" aria-label="Log in"><UserRound size={16} /> <span>Log in</span></a>}
         {!isUtilityView && <button className="primary compact" disabled={busy || !loaded} onClick={() => input.current?.click()}><Plus size={17} /> Import<span className="wide-only"> documents</span></button>}</div>
       <input ref={input} type="file" aria-label="Import documents" accept=".pdf,.epub,.docx,.txt" multiple hidden onChange={event => {
@@ -219,7 +222,7 @@ export function App() {
     <main className="workspace">
       {error && !isUtilityView && <div className="notice error" role="alert">{error}<button className="icon-button" aria-label="Dismiss error" onClick={() => setError('')}><X size={17} /></button></div>}
       {status && !isUtilityView && (!selected || busy) && <div className="notice" role="status"><span>{status}</span>{!busy && <button className="icon-button" aria-label="Dismiss status" onClick={() => setStatus('')}><X size={17} /></button>}</div>}
-      {accountView ? <AccountPage key={view} signup={view === '#signup'} /> : showingPreferences ? <PreferencesPage dark={dark} setDark={setDark} logout={logout} /> : selected && active ? <Reader key={selected.id} book={selected} passages={active.passages} dark={dark} toggleTheme={() => setDark(!dark)} save={changes => patch(selected.id, changes)} onBack={() => { setActive(undefined); setStatus(''); window.scrollTo(0, 0) }} />
+      {accountView ? <AccountPage key={view} signup={view === '#signup'} /> : showingPreferences ? <PreferencesPage dark={dark} setDark={setDark} logout={logout} constellation={constellation} setConstellation={setConstellation} /> : selected && active ? <Reader key={selected.id} book={selected} passages={active.passages} dark={dark} toggleTheme={() => setDark(!dark)} save={changes => patch(selected.id, changes)} onBack={() => { setActive(undefined); setStatus(''); window.scrollTo(0, 0) }} />
         : <>
           <section className="hero" aria-labelledby="welcome">
             <div className="hero-copy"><span className="kicker"><span /> Your reading room</span>
@@ -714,7 +717,7 @@ function Reader({ book, passages, dark, toggleTheme, save, onBack }: {
         {pageNavigation('Reader pages')}
       </>}
     <div className={`player ${collapsed ? '' : 'player-settings-open'}`}>
-      <div className="player-main"><span className="player-icon"><Headphones size={19} /></span><div><strong>{narration.speaker === 'natural' ? 'Kokoro' : narration.speaker === 'device' ? 'Device voice' : 'Audiobook'}</strong>
+      <div className="player-main"><span className="player-icon"><Headphones size={19} /></span><div><strong>{narration.speaker === 'natural' ? narration.engine === 'qwen' ? 'Qwen3-TTS' : 'Kokoro' : narration.speaker === 'device' ? 'Device voice' : 'Audiobook'}</strong>
         <small>{preparing ? (narration.state === 'loading' ? 'Preparing narration' : 'Buffering next clip') : `Passage ${(narration.state !== 'idle' && speakingPosition.current ? speakingPosition.current.index : cursor) + 1}`}</small></div>
         <button className="primary compact" disabled={!narration.supported} onClick={() => narration.toggle(position)}>{narration.state === 'playing' || preparing ? <Pause size={16} /> : <Play size={16} />} {actionName}</button>
         <button className="icon-button" disabled={narration.state === 'idle'} aria-label="Stop narration" onClick={() => { narration.stop(); setMessage('') }}><Square size={15} /></button>
@@ -726,11 +729,15 @@ function Reader({ book, passages, dark, toggleTheme, save, onBack }: {
       </div>}
       {!collapsed && <>
         <div className="player-options">
-          <label>Engine <select value={narration.engine} onChange={event => { narration.stop(); setMessage(''); narration.setEngine(event.target.value as typeof narration.engine) }}><option value="auto">Automatic</option><option value="natural">Kokoro only</option><option value="device">Device speech</option></select></label>
-          {narration.engine !== 'device'
+          <label>Engine <select value={narration.engine} onChange={event => { narration.stop(); setMessage(''); narration.setEngine(event.target.value as typeof narration.engine) }}>{voiceEngines.map(value => <option key={value} value={value}>{voiceEngineLabels[value]}</option>)}</select></label>
+          {narration.engine === 'qwen'
+            ? <label>Voice <select value={narration.qwenVoice} onChange={event => { narration.stop(); narration.setQwenVoice(event.target.value as QwenVoice) }}>{qwenVoices.map(value => <option key={value}>{value}</option>)}</select></label>
+            : narration.engine !== 'device'
             ? <label>Voice <select value={narration.naturalVoice} onChange={event => { narration.stop(); narration.setNaturalVoice(event.target.value as NaturalVoice) }}>{Object.entries(naturalVoices).map(([id, title]) => <option key={id} value={id}>{title}</option>)}</select></label>
             : <label>Voice <select value={narration.voiceKey} onChange={event => { narration.stop(); narration.setVoiceKey(event.target.value) }}><option value="">Device default</option>{narration.voices.map(voice => <option key={voice.voiceURI} value={voice.voiceURI}>{voice.name}</option>)}</select></label>}
-          {narration.engine !== 'device' && <button className="secondary compact" disabled={!narration.supported || narration.preparation !== 'idle' || narration.state !== 'idle'}
+          {narration.engine === 'qwen' ? <button className="secondary compact" disabled={narration.qwenPreparation || narration.state !== 'idle'}
+            onClick={() => void narration.prepareQwen()}>{narration.qwenPreparation ? 'Checking Qwen…' : 'Check Qwen connection'}</button>
+          : narration.engine !== 'device' && <button className="secondary compact" disabled={!narration.supported || narration.preparation !== 'idle' || narration.state !== 'idle'}
             onClick={() => void narration.prepareKokoro()}>{narration.preparation === 'ready' ? 'Kokoro ready' : narration.preparation === 'preparing' ? 'Preparing Kokoro…' : 'Prepare Kokoro'}</button>}
           <button className="secondary compact" disabled={!narration.supported || narration.state === 'loading'} onClick={() => narration.play(position, true)}>Preview voice</button>
           <label>Speed <select value={narration.rate} onChange={event => narration.setRate(Number(event.target.value))}>{readingRates.map(value => <option key={value} value={value}>{value}×</option>)}</select></label>
@@ -738,7 +745,8 @@ function Reader({ book, passages, dark, toggleTheme, save, onBack }: {
           <label><input type="checkbox" checked={follow} onChange={event => setFollow(event.target.checked)} /> Follow narration</label>
           {nextChapter !== undefined && <button className="secondary compact" onClick={() => narration.play({ index: nextChapter, offset: 0 })}><SkipForward size={15} /> Listen from next chapter</button>}
         </div>
-        {narration.engine !== 'device' && <p className="narration-help">{narration.engine === 'auto'
+        {narration.engine === 'qwen' ? <p className="narration-help">Narration runs on your Mac. <a href="https://github.com/BandaAkshith/auden-reader#qwen3-tts-on-apple-silicon" target="_blank" rel="noreferrer">Qwen setup</a></p>
+        : narration.engine !== 'device' && <p className="narration-help">{narration.engine === 'auto'
           ? 'Automatic starts with a device voice when needed and switches to Kokoro when a clip is ready.'
           : 'Kokoro queues audio ahead and joins ready clips continuously. The first use needs a model download.'}</p>}
       </>}

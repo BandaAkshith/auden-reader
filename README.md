@@ -15,7 +15,7 @@ Run `npm run build --prefix pages` to type-check and build the production site. 
 
 ## Where the library lives
 
-Imported text, PDF originals, notes, bookmarks, and progress live in this browser's IndexedDB storage for the site. Use the reading-history and annotation exports to keep copies of that information. The Pages edition has no accounts or cross-device sync. Clearing site data removes the browser library.
+Imported text, PDF originals, notes, bookmarks, and progress live in this browser's IndexedDB storage for the site. Use the reading-history and annotation exports to keep copies of that information. Clearing site data removes the browser library.
 
 PDF imports require an extractable text layer. EPUB imports support text in standard EPUB XHTML chapters. Narration uses voices the browser identifies as on-device, so voice availability varies by platform. The existing FastAPI and Kokoro edition runs separately.
 
@@ -35,6 +35,24 @@ Tap a sentence or press **Listen** to begin. **Autoplay** is on by default and c
 
 Auden offers a guest library plus optional browser-local accounts. Use **Log in** or **Create an account** to switch to a separate library and **Preferences** to configure reader and audiobook defaults. Existing browser libraries remain available as guest. To copy books from guest into an account, download a browser library ZIP as guest and restore it while signed in. Device accounts do not sync or encrypt the library. The website stores only a salted passphrase verifier for the account screen.
 
+Open **Preferences → Profile** to choose one of the twelve zodiac signs or Ophiuchus. One selection sets the built-in avatar and matching constellation banner for the browser profile.
+
 Kokoro-only playback starts with one short clip, then renders up to five sentences per group. It keeps up to three upcoming groups in memory and can render two groups at once on capable desktops. The audio clock joins prepared groups directly and trims excess silence from clip edges while keeping natural punctuation pauses. Choose **Prepare Kokoro** in Audio settings to load the model and chosen voice before listening. Synthesis can still fall behind on slower devices. **Automatic** uses device speech while the next Kokoro group is rendering. The reading highlight estimates the position from the clip time.
 
 Narration adjusts delivery for explicit dialogue cues such as “she whispered” or “he shouted.” It also recognizes “chu chu” near train references and “tuk tuk” near door knocks. The original text stays visible in the reader.
+
+## Qwen3-TTS on Apple Silicon
+
+Qwen3-TTS is an optional local narrator with Ryan and Aiden voices and support for delivery instructions. Auden uses the 1.7B CustomVoice model through MLX-Audio. It runs without a paid API and book passages stay on your Mac. The model download is about 2.3 GB.
+
+From the repository root on an Apple Silicon Mac with Python 3.12:
+
+```sh
+python3.12 -m venv .qwen-venv
+.qwen-venv/bin/python -m pip install -r qwen/requirements.txt
+.qwen-venv/bin/python qwen/serve.py
+```
+
+Keep the companion running while listening. The first start downloads the model and prints **Qwen3-TTS ready** when it can generate audio. In Auden, select **Qwen3-TTS (local)** in **Audio settings**, then use **Check Qwen connection** or **Listen**. Allow local network access if your browser asks. If your browser does not let the hosted page reach loopback, open the local frontend with `npm run dev --prefix pages` at `http://127.0.0.1:5173`.
+
+Qwen joins ready clips using the same look-ahead player as Kokoro. Total generation time and any buffering depend on the Mac and the selected passage.

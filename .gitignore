@@ -4,3 +4,7 @@ dist/
 .env.*
 .DS_Store
 *.log
+
+.qwen-venv/
+.qwen-cache/
+__pycache__/

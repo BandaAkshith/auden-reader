@@ -3,11 +3,12 @@ import { delivery, deliveryFor, makeClip, naturalClip, nextReadable, positionInC
 import { profileKey } from './accounts'
 import { usePreference } from './readerPreferences'
 import { naturalVoices, type NaturalVoice } from './voiceCatalog'
+import { qwenVoices, renderQwen, voiceEngines, waitForQwen, type QwenVoice } from './qwen'
 
 export type { Position } from './playbackClips'
 type AudioData = { samples: Float32Array; sampleRate: number }
 type State = 'idle' | 'loading' | 'buffering' | 'playing' | 'paused'
-type Engine = 'auto' | 'natural' | 'device'
+type Engine = typeof voiceEngines[number]
 type Lane = 0 | 1
 type Pending = { lane: Lane; resolve: (data?: AudioData) => void; reject: (error: Error) => void; progress: (status: string) => void; timeout: number }
 type SpeechClip = Clip | NaturalClip
@@ -44,11 +45,12 @@ function initialEngine(): Engine {
 
 export function useNarration(passages: string[], onPosition: (point: Position) => void, report: (message: string) => void, shouldSkip: (index: number) => boolean, nextChapter?: number) {
   const synth = window.speechSynthesis
-  const [engine, setEngine] = usePreference<Engine>('playback-engine', initialEngine(), ['auto', 'natural', 'device'])
+  const [engine, setEngine] = usePreference<Engine>('playback-engine', initialEngine(), voiceEngines)
   const [autoplay, setAutoplay] = usePreference<boolean>('playback-autoplay', true)
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([])
   const [voiceKey, setVoiceKey] = usePreference<string>('voice', '')
   const [naturalVoice, setNaturalVoice] = usePreference<NaturalVoice>('natural-voice', 'am_michael', Object.keys(naturalVoices) as NaturalVoice[])
+  const [qwenVoice, setQwenVoice] = usePreference<QwenVoice>('qwen-voice', 'Ryan', qwenVoices)
   const [rate, setRate] = usePreference<number>('rate', 1, [0.75, 0.8, 1, 1.15, 1.2, 1.3, 1.5, 1.75, 2])
   const [state, setState] = useState<State>('idle')
   const [speaker, setSpeaker] = useState<'device' | 'natural' | null>(null)
@@ -56,6 +58,7 @@ export function useNarration(passages: string[], onPosition: (point: Position) =
   const [minutes, setMinutes] = useState(0)
   const [buffered, setBuffered] = useState(0)
   const [preparation, setPreparation] = useState<'idle' | 'preparing' | 'ready'>('idle')
+  const [qwenPreparation, setQwenPreparation] = useState(false)
   const [clock, setClock] = useState({ elapsed: 0, duration: 0 })
   const config = useRef({ autoplay, rate, onPosition, report, shouldSkip })
   config.current = { autoplay, rate, onPosition, report, shouldSkip }
@@ -74,6 +77,7 @@ export function useNarration(passages: string[], onPosition: (point: Position) =
   const warm = useRef<Promise<void> | null>(null)
   const warmReady = useRef(false)
   const requestId = useRef(0)
+  const qwenRequest = useRef<AbortController | null>(null)
   const pending = useRef(new Map<number, Pending>())
 
   useEffect(() => {
@@ -88,6 +92,7 @@ export function useNarration(passages: string[], onPosition: (point: Position) =
     generation.current++
     window.clearTimeout(timer.current)
     previewAudio.current?.pause()
+    qwenRequest.current?.abort()
     if (utterance.current) { utterance.current = null; synth?.cancel() }
     stopSource()
     releaseWorker(new Error('Narration closed.'))
@@ -142,6 +147,9 @@ export function useNarration(passages: string[], onPosition: (point: Position) =
   function stop() {
     for (const worker of workers.current) worker?.postMessage({ kind: 'cancel', session: generation.current })
     generation.current++
+    qwenRequest.current?.abort()
+    qwenRequest.current = null
+    setQwenPreparation(false)
     transport.current = undefined
     previewAudio.current?.pause()
     previewAudio.current = null
@@ -245,6 +253,24 @@ export function useNarration(passages: string[], onPosition: (point: Position) =
     }
   }
 
+  async function prepareQwen() {
+    qwenRequest.current?.abort()
+    const request = new AbortController()
+    qwenRequest.current = request
+    setQwenPreparation(true)
+    try {
+      await waitForQwen(request.signal, () => config.current.report('Qwen is loading on this Mac…'))
+      if (!request.signal.aborted) config.current.report('Qwen3-TTS is ready.')
+    } catch (error) {
+      if (!request.signal.aborted) config.current.report((error as Error).message)
+    } finally {
+      if (qwenRequest.current === request) {
+        qwenRequest.current = null
+        setQwenPreparation(false)
+      }
+    }
+  }
+
   function startBuffer(offset: number, prepared?: ScheduledAudio) {
     const sound = audio.current
     const ctx = context.current
@@ -310,8 +336,13 @@ export function useNarration(passages: string[], onPosition: (point: Position) =
   function play(point: Position, preview = false) {
     stop()
     config.current.report('')
-    if (preview) { playPreview(); return }
+    const qwen = engine === 'qwen'
+    if (preview && !qwen) { playPreview(); return }
     const session = generation.current
+    const qwenSession = qwen ? new AbortController() : null
+    if (qwenSession) qwenRequest.current = qwenSession
+    let qwenReady = false
+    let renderError = ''
     const stillHere = () => session === generation.current
     const voice = deviceVoice()
     const natural = engine !== 'device' && Boolean(window.AudioContext)
@@ -339,6 +370,7 @@ export function useNarration(passages: string[], onPosition: (point: Position) =
     }
 
     function nextClip(origin: Position, maximumSentences = 5, maximumCharacters = 220) {
+      if (preview) return origin.index === 0 ? { point: origin, end: sample.length, next: { index: 1, offset: 0 }, text: sample } : undefined
       const next = nextReadable(passages, origin, config.current.shouldSkip)
       if (chapterStop.current !== undefined && next.index >= chapterStop.current) return
       return natural ? naturalClip(passages, next, config.current.shouldSkip, chapterStop.current, maximumSentences, maximumCharacters) : makeClip(passages, next)
@@ -347,6 +379,7 @@ export function useNarration(passages: string[], onPosition: (point: Position) =
     function finish() {
       const chapter = chapterStop.current !== undefined
       stop()
+      if (preview) return
       setSleepTimer(0)
       config.current.report(chapter ? 'Stopped at the end of the chapter.' : 'You reached the end of the book.')
     }
@@ -359,7 +392,7 @@ export function useNarration(passages: string[], onPosition: (point: Position) =
     function queue(clip: SpeechClip, visible: boolean, lane: Lane = 0): Prediction {
       const requestedRate = config.current.rate
       const parts = 'parts' in clip ? clip.parts : [clip]
-      const text = parts.map(part => {
+      const text = preview ? sample : parts.map(part => {
         const index = part.point.index
         const nearby = passages[index].slice(Math.max(0, part.point.offset - 100), part.end + 180)
         return spokenText(part.text, nearby + ' ' + (passages[index + 1]?.slice(0, 120) || ''))
@@ -367,20 +400,28 @@ export function useNarration(passages: string[], onPosition: (point: Position) =
       const style = delivery[deliveryFor(clip.text)]
       const job: Prediction = {
         clip, rate: requestedRate, lane,
-        promise: Promise.resolve().then(() => stillHere()
-          ? request('synthesize', session, naturalVoice, visible, text, requestedRate * style.pace, lane)
-          : null)
-          .then(data => {
+        promise: Promise.resolve().then(async () => {
+          if (!stillHere()) return null
+          const ctx = context.current!
+          if (qwenSession) {
+            const wav = await renderQwen(text, qwenVoice, requestedRate, qwenSession.signal)
+            if (!stillHere()) return null
+            const decoded = await ctx.decodeAudioData(wav)
+            return { samples: decoded.getChannelData(0), sampleRate: decoded.sampleRate }
+          }
+          return request('synthesize', session, naturalVoice, visible, text, requestedRate * style.pace, lane)
+        }).then(data => {
             if (!data || !stillHere()) return null
             const samples = trimAudioPadding(data.samples, data.sampleRate)
             const buffer = context.current!.createBuffer(1, samples.length, data.sampleRate)
             const channel = buffer.getChannelData(0)
             channel.set(samples)
-            if (style.volume !== 1) {
+            if (!qwen && style.volume !== 1) {
               for (let i = 0; i < channel.length; i++) channel[i] *= style.volume
             }
             return buffer
-          }).catch(() => {
+          }).catch(error => {
+            if (qwen && visible && stillHere()) renderError = (error as Error).message
             if (lane === 1 && stillHere()) {
               parallelFailed.current = true
               releaseWorker(new Error('Parallel rendering is unavailable.'), lane)
@@ -404,7 +445,7 @@ export function useNarration(passages: string[], onPosition: (point: Position) =
     }
 
     function prefetch() {
-      if (!stillHere() || !current || !natural || modelFailed || !warmReady.current) return
+      if (!stillHere() || !current || preview || !natural || modelFailed || !(qwen ? qwenReady : warmReady.current)) return
       bufferQueue = bufferQueue.filter(job => job.rate === config.current.rate &&
         order(job.clip.point, current.point) > 0 && job.result !== null)
       updateBuffer()
@@ -414,7 +455,7 @@ export function useNarration(passages: string[], onPosition: (point: Position) =
       for (let ahead = 1; automatic && usedDevice && candidate && ahead < lookahead; ahead++) {
         candidate = nextClip(candidate.next)
       }
-      const parallel = !automatic && !parallelFailed.current && canRenderInParallel()
+      const parallel = !qwen && !automatic && !parallelFailed.current && canRenderInParallel()
       for (const lane of parallel ? [0, 1] as const : [0] as const) {
         if (inFlight[lane] || bufferQueue.length >= 3) continue
         while (candidate && bufferQueue.some(item => order(item.clip.point, candidate!.point) === 0)) {
@@ -444,6 +485,7 @@ export function useNarration(passages: string[], onPosition: (point: Position) =
     }
 
     function highlight(clip: SpeechClip, offset: number, wordLength?: number) {
+      if (preview) return
       const { part, offset: sourceOffset } = positionInClip(clip, offset)
       if (!highlighted || order(highlighted, part.point) !== 0) {
         highlighted = part.point
@@ -558,19 +600,22 @@ export function useNarration(passages: string[], onPosition: (point: Position) =
         prefetch()
       }
       if (job?.result) { useBuffer(job.result); return }
-      void prepareModel(session, !automatic).then(() => {
+      const ready = qwenSession ? (qwenReady ? Promise.resolve() : waitForQwen(qwenSession.signal, () => {
+        if (stillHere()) config.current.report('Qwen is loading on this Mac…')
+      }).then(() => { qwenReady = true })) : prepareModel(session, !automatic)
+      void ready.then(() => {
         if (!stillHere()) return null
         if (job?.rate !== config.current.rate) {
           const active = queue(clip, !automatic)
           prefetch()
           return active.promise
         }
-        return job.promise.then(buffer => buffer || (stillHere() && job.lane === 1 ? queue(clip, !automatic).promise : null))
+        return job.promise.then(buffer => buffer || (stillHere() && (qwen || job.lane === 1) ? queue(clip, !automatic).promise : null))
       }).then(buffer => {
         if (!stillHere()) return
-        if (!buffer) throw new Error('Audio could not be rendered.')
+          if (!buffer) throw new Error(renderError || 'Audio could not be rendered.')
         useBuffer(buffer)
-      }).catch(() => {
+      }).catch(error => {
         if (!stillHere()) return
         if (automatic) {
           modelFailed = true
@@ -579,7 +624,7 @@ export function useNarration(passages: string[], onPosition: (point: Position) =
           if (!paused) resumeStep()
         } else {
           stop()
-          config.current.report('Kokoro audio could not load. Try Automatic or Device speech.')
+          config.current.report(qwen ? (error as Error).message : 'Kokoro audio could not load. Try Automatic or Device speech.')
         }
       })
     }
@@ -598,7 +643,7 @@ export function useNarration(passages: string[], onPosition: (point: Position) =
       speak(clip, 0, automatic && !modelFailed)
     }
 
-    const first = nextClip(point, natural && !automatic ? 1 : 5, natural && !automatic ? 115 : 220)
+    const first = nextClip(preview ? { index: 0, offset: 0 } : point, natural && !automatic ? 1 : 5, natural && !automatic ? 115 : 220)
     if (!first) { finish(); return }
     transport.current = {
       paused: false,
@@ -632,7 +677,8 @@ export function useNarration(passages: string[], onPosition: (point: Position) =
     else { audio.current.offset = offset; setClock({ elapsed: offset, duration: audio.current.buffer.duration }) }
   }
 
-  const supported = (engine !== 'device' && Boolean(window.AudioContext)) || (engine !== 'natural' && Boolean(synth))
+  const supported = (engine !== 'device' && Boolean(window.AudioContext)) || ((engine === 'device' || engine === 'auto') && Boolean(synth))
   return { supported, voices, voiceKey, setVoiceKey, naturalVoice, setNaturalVoice, engine, setEngine, autoplay, setAutoplay,
-    rate, setRate, state, speaker, boundary, toggle, stop, play, minutes, setSleepTimer, clock, seek, buffered, preparation, prepareKokoro }
+    rate, setRate, state, speaker, boundary, toggle, stop, play, minutes, setSleepTimer, clock, seek, buffered,
+    preparation, prepareKokoro, qwenVoice, setQwenVoice, qwenPreparation, prepareQwen }
 }

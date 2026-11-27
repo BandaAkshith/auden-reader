@@ -2,21 +2,32 @@ import { ArrowLeft, BookOpen, Headphones, UserRound } from 'lucide-react'
 import { profile } from './accounts'
 import { usePreference } from './readerPreferences'
 import { naturalVoices, type NaturalVoice } from './voiceCatalog'
+import { ProfileAppearance, type Constellation } from './ProfileAppearance'
+import { qwenVoices, voiceEngineLabels, voiceEngines, type QwenVoice } from './qwen'
 
 export const layouts = ['single', 'spread', 'scroll'] as const
 export const papers = ['match', 'parchment', 'white', 'night', 'contrast'] as const
 export const typefaces = ['literary', 'classic', 'system', 'clean'] as const
 export const readingRates = [.75, .8, 1, 1.15, 1.2, 1.3, 1.5, 1.75, 2]
 
-export function PreferencesPage({ dark, setDark, logout }: { dark: boolean; setDark: (dark: boolean) => void; logout: () => void }) {
+type PreferencesProps = {
+  dark: boolean
+  setDark: (dark: boolean) => void
+  logout: () => void
+  constellation: Constellation
+  setConstellation: (value: Constellation) => void
+}
+
+export function PreferencesPage({ dark, setDark, logout, constellation, setConstellation }: PreferencesProps) {
   const [layout, setLayout] = usePreference<typeof layouts[number]>('layout', 'single', layouts)
   const [paper, setPaper] = usePreference<typeof papers[number]>('paper', 'match', papers)
   const [font, setFont] = usePreference<number>('font-size', 20, [17, 20, 25, 31])
   const [typeface, setTypeface] = usePreference<typeof typefaces[number]>('typeface', 'literary', typefaces)
   const [spacing, setSpacing] = usePreference<number>('line-spacing', 1.65, [1.45, 1.65, 1.9, 2.2])
   const [follow, setFollow] = usePreference<boolean>('follow-narration', true)
-  const [engine, setEngine] = usePreference<'auto' | 'natural' | 'device'>('playback-engine', 'auto', ['auto', 'natural', 'device'])
+  const [engine, setEngine] = usePreference<typeof voiceEngines[number]>('playback-engine', 'auto', voiceEngines)
   const [voice, setVoice] = usePreference<NaturalVoice>('natural-voice', 'am_michael', Object.keys(naturalVoices) as NaturalVoice[])
+  const [qwenVoice, setQwenVoice] = usePreference<QwenVoice>('qwen-voice', 'Ryan', qwenVoices)
   const [rate, setRate] = usePreference<number>('rate', 1, readingRates)
   const [autoplay, setAutoplay] = usePreference<boolean>('playback-autoplay', true)
 
@@ -24,6 +35,7 @@ export function PreferencesPage({ dark, setDark, logout }: { dark: boolean; setD
     <a className="back" href="#"><ArrowLeft size={16} /> Back to library</a>
     <h1>Preferences</h1>
     <p>Changes are saved as you make them.</p>
+    <ProfileAppearance sign={constellation} choose={setConstellation} name={profile?.name || 'Guest reader'} />
     <section className="preferences-card" aria-labelledby="reading-preferences">
       <h2 id="reading-preferences"><BookOpen size={20} /> Reading</h2>
       <div className="preferences-grid">
@@ -38,12 +50,14 @@ export function PreferencesPage({ dark, setDark, logout }: { dark: boolean; setD
     <section className="preferences-card" aria-labelledby="audio-preferences">
       <h2 id="audio-preferences"><Headphones size={20} /> Narration</h2>
       <div className="preferences-grid">
-        <label>Voice engine <select value={engine} onChange={event => setEngine(event.target.value as typeof engine)}><option value="auto">Automatic</option><option value="natural">Kokoro only</option><option value="device">Device speech</option></select></label>
-        {engine !== 'device' && <label>Kokoro voice <select value={voice} onChange={event => setVoice(event.target.value as NaturalVoice)}>{Object.entries(naturalVoices).map(([key, label]) => <option value={key} key={key}>{label}</option>)}</select></label>}
+        <label>Voice engine <select value={engine} onChange={event => setEngine(event.target.value as typeof engine)}>{voiceEngines.map(value => <option key={value} value={value}>{voiceEngineLabels[value]}</option>)}</select></label>
+        {engine === 'qwen' ? <label>Qwen voice <select value={qwenVoice} onChange={event => setQwenVoice(event.target.value as QwenVoice)}>{qwenVoices.map(value => <option key={value}>{value}</option>)}</select></label>
+          : engine !== 'device' && <label>Kokoro voice <select value={voice} onChange={event => setVoice(event.target.value as NaturalVoice)}>{Object.entries(naturalVoices).map(([key, label]) => <option value={key} key={key}>{label}</option>)}</select></label>}
         <label>Speaking speed <select value={rate} onChange={event => setRate(Number(event.target.value))}>{readingRates.map(speed => <option key={speed} value={speed}>{speed}×</option>)}</select></label>
         <label className="settings-check"><input type="checkbox" checked={autoplay} onChange={event => setAutoplay(event.target.checked)} /> Autoplay</label>
         <label className="settings-check"><input type="checkbox" checked={follow} onChange={event => setFollow(event.target.checked)} /> Follow narration</label>
       </div>
+      {engine === 'qwen' && <p className="narration-help">Qwen3-TTS uses the free Auden companion on your Mac. <a href="https://github.com/BandaAkshith/auden-reader#qwen3-tts-on-apple-silicon" target="_blank" rel="noreferrer">Local setup</a></p>}
     </section>
     <section className="preferences-card" aria-labelledby="device-preferences">
       <h2 id="device-preferences"><UserRound size={20} /> Device account</h2>

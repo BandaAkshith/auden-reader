@@ -459,3 +459,60 @@ progress::-webkit-progress-value { background: #557760 }
   .masthead-end .account-link { padding-inline: 7px; }
   .masthead-end .account-link span { display: none; }
 }
+
+.profile-card { overflow: hidden; }
+.profile-banner {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  min-height: 130px;
+  display: flex;
+  align-items: flex-end;
+  padding: 19px;
+  border-radius: 12px;
+  color: #fff9f3;
+  background: radial-gradient(ellipse at 77% 24%, var(--constellation-background), transparent 72%), #171523;
+}
+.profile-banner::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  opacity: .32;
+  background-image: radial-gradient(circle at 13px 8px, #fff 0 .8px, transparent 1.5px),
+    radial-gradient(circle at 18px 23px, var(--constellation-accent) 0 .7px, transparent 1.3px);
+  background-size: 43px 31px, 37px 47px;
+}
+.profile-star-map { position: absolute; right: 10%; top: 17px; width: 100px; height: 100px; z-index: -1; color: var(--constellation-accent); }
+.profile-star-map i, .profile-star-map b { position: absolute; background: currentColor; }
+.profile-star-map i { height: 1px; transform-origin: left center; opacity: .68; }
+.profile-star-map b { width: 4px; height: 4px; border-radius: 50%; transform: translate(-50%, -50%); box-shadow: 0 0 9px 1px currentColor; }
+.profile-identity { display: flex; align-items: center; gap: 12px; }
+.profile-identity strong, .profile-identity div > span { display: block; overflow-wrap: anywhere; }
+.profile-identity strong { font-family: Georgia, serif; font-size: 1.25rem; }
+.profile-identity div > span { margin-top: 3px; font-size: .82rem; color: var(--constellation-accent); }
+.constellation-avatar {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: var(--avatar-size, 34px);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  border: 1px solid color-mix(in srgb, var(--constellation-accent) 58%, transparent);
+  color: var(--constellation-accent);
+  background: var(--constellation-background);
+  font: var(--avatar-font, 21px)/1 "Segoe UI Symbol", "Apple Symbols", sans-serif;
+  font-variant-emoji: text;
+}
+.profile-identity .constellation-avatar { --avatar-size: 56px; --avatar-font: 32px; }
+.profile-link { display: grid; place-items: center; min-height: 38px; min-width: 38px; border-radius: 50%; }
+.constellation-picker { margin: 18px 0 0; padding: 0; border: 0; min-width: 0; }
+.constellation-picker legend { padding: 0; font-weight: 600; }
+.constellation-picker p { margin: 4px 0 12px; color: var(--muted); font-size: .87rem; }
+.constellation-options { display: grid; grid-template-columns: repeat(auto-fit, minmax(102px, 1fr)); gap: 7px; }
+.constellation-options label { position: relative; cursor: pointer; }
+.constellation-options input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.constellation-choice { display: flex; align-items: center; gap: 6px; min-height: 42px; padding: 4px 6px; border: 1px solid var(--line); border-radius: 8px; font-size: .76rem; }
+.constellation-choice .constellation-avatar { --avatar-size: 25px; --avatar-font: 16px; }
+.constellation-options input:checked + .constellation-choice { border-color: var(--green); background: var(--highlight); box-shadow: inset 0 0 0 1px var(--green); }
+.constellation-options input:focus-visible + .constellation-choice { outline: 2px solid var(--green); outline-offset: 2px; }

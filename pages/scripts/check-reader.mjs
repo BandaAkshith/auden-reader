@@ -7,7 +7,7 @@ import ts from 'typescript'
 
 const temporary = await mkdtemp(join(tmpdir(), 'auden-reader-'))
 try {
-  for (const name of ['chapters', 'readingLayout', 'playbackClips']) {
+  for (const name of ['chapters', 'readingLayout', 'playbackClips', 'qwen']) {
     const source = await readFile(new URL(`../src/${name}.ts`, import.meta.url), 'utf8')
     const { outputText } = ts.transpileModule(source, {
       compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
@@ -17,6 +17,7 @@ try {
 
   const { paginate, bookStructure } = await import(pathToFileURL(join(temporary, 'readingLayout.mjs')))
   const { makeClip, nextReadable, naturalClip, positionInClip, spokenText, deliveryFor, trimAudioPadding } = await import(pathToFileURL(join(temporary, 'playbackClips.mjs')))
+  const { qwenDirection } = await import(pathToFileURL(join(temporary, 'qwen.mjs')))
   const passages = ['Chapter 1: Arrival', 'Part I: The Harbor', 'A long line with words in it. '.repeat(90),
     'Chapter 2: Departure', 'Part II: The Coast', 'Then the ship left. '.repeat(80), 'Afterword', 'Appendix']
   const structure = bookStructure(passages)
@@ -79,6 +80,10 @@ try {
   assert.equal(spokenText('Chu chu!', 'The train left the station.'), 'Choo-choo!')
   assert.equal(spokenText('Tuk tuk.', 'She knocked on the door.'), 'Tuck. Tuck.')
   assert.equal(spokenText('Tuk tuk passed by.', 'We were stuck in traffic.'), 'Tuk tuk passed by.')
+  assert.equal(qwenDirection('Choo-choo! The train left.'), 'train')
+  assert.equal(qwenDirection('Tuck. Tuck. She knocked.'), 'knock')
+  assert.equal(qwenDirection(dialogue[2]), 'sad')
+  assert.equal(qwenDirection('The train left the station.'), 'plain')
   const signal = new Float32Array(1000)
   signal.fill(.5, 350, 450)
   assert.equal(trimAudioPadding(signal, 1000).length, 235)
