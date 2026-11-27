@@ -42,12 +42,12 @@ export function naturalClip(passages: string[], start: Position, shouldSkip: (in
     const remaining = passages[point.index].slice(point.offset)
     const sentence = splitSentences(remaining)[0]?.text
     if (!sentence) break
-    const capacity = 350 - text.length - Number(Boolean(text))
+    const capacity = 220 - text.length - Number(Boolean(text))
     if (parts.length && sentence.length > capacity) break
     let length = Math.min(sentence.length, capacity)
     if (length < sentence.length) {
       const boundary = sentence.slice(0, length).search(/\s+\S*$/)
-      if (boundary > 150) length = boundary + 1
+      if (boundary > capacity * .6) length = boundary + 1
     }
     const spoken = remaining.slice(0, length)
     const end = point.offset + length

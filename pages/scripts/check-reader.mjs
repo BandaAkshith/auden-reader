@@ -60,6 +60,8 @@ try {
   const short = ['Rain fell.', 'The lamp glowed.', 'A bell rang.', 'The ferry arrived.', 'Mira went home.', 'The fire was warm.']
   const group = naturalClip(short, { index: 0, offset: 0 }, () => false)
   assert.equal(group.sentences, 5)
+  const long = Array.from({ length: 5 }, () => 'Words for the voice to say, in a slow and steady rhythm, with a distinct ending.')
+  assert(naturalClip(long, { index: 0, offset: 0 }, () => false).text.length <= 220)
   assert.equal(naturalClip(short, { index: 0, offset: 0 }, () => false, undefined, 1).sentences, 1)
   assert.deepEqual(group.next, { index: 5, offset: 0 })
   assert.equal(positionInClip(group, group.parts[3].at + 4).part.point.index, 3)

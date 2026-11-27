@@ -46,6 +46,7 @@ export function useNarration(passages: string[], onPosition: (point: Position) =
   const [boundary, setBoundary] = useState<{ start: number; end: number } | null>(null)
   const [minutes, setMinutes] = useState(0)
   const [buffered, setBuffered] = useState(0)
+  const [preparation, setPreparation] = useState<'idle' | 'preparing' | 'ready'>('idle')
   const [clock, setClock] = useState({ elapsed: 0, duration: 0 })
   const config = useRef({ autoplay, rate, onPosition, report, shouldSkip })
   config.current = { autoplay, rate, onPosition, report, shouldSkip }
@@ -166,12 +167,19 @@ export function useNarration(passages: string[], onPosition: (point: Position) =
         if (data.error) request.reject(new Error(data.error))
         else request.resolve(data.samples ? data : undefined)
       }
-      instance.onerror = () => { if (worker.current === instance) releaseWorker(new Error('The voice worker could not start.')) }
+      instance.onerror = () => {
+        if (worker.current !== instance) return
+        releaseWorker(new Error('The voice worker could not start.'))
+        setPreparation('idle')
+      }
       worker.current = instance
     }
     const id = ++requestId.current
     return new Promise<AudioData | undefined>((resolve, reject) => {
-      const timeout = window.setTimeout(() => releaseWorker(new Error('Kokoro took too long to prepare.')), 150_000)
+      const timeout = window.setTimeout(() => {
+        releaseWorker(new Error('Kokoro took too long to prepare.'))
+        setPreparation('idle')
+      }, 150_000)
       pending.current.set(id, { resolve, reject, timeout, progress: status => {
         if (reportStatus && session === generation.current) config.current.report(status)
       } })
@@ -181,10 +189,28 @@ export function useNarration(passages: string[], onPosition: (point: Position) =
 
   function prepareModel(session: number, showProgress: boolean) {
     if (!warm.current) {
-      warm.current = request('prepare', session, naturalVoice, showProgress).then(() => { warmReady.current = true })
-        .catch(error => { warm.current = null; throw error })
+      setPreparation('preparing')
+      warm.current = request('prepare', session, naturalVoice, showProgress).then(() => {
+        warmReady.current = true
+        setPreparation('ready')
+      }).catch(error => {
+        warm.current = null
+        setPreparation('idle')
+        throw error
+      })
     }
     return warm.current
+  }
+
+  async function prepareKokoro() {
+    const session = generation.current
+    config.current.report('Preparing the Kokoro model…')
+    try {
+      await prepareModel(session, true)
+      if (session === generation.current) config.current.report('Kokoro is ready to start.')
+    } catch {
+      if (session === generation.current) config.current.report('Kokoro could not load. Try again or switch to Device speech.')
+    }
   }
 
   function startBuffer(offset: number) {
@@ -508,5 +534,5 @@ export function useNarration(passages: string[], onPosition: (point: Position) =
 
   const supported = (engine !== 'device' && Boolean(window.AudioContext)) || (engine !== 'natural' && Boolean(synth))
   return { supported, voices, voiceKey, setVoiceKey, naturalVoice, setNaturalVoice, engine, setEngine, autoplay, setAutoplay,
-    rate, setRate, state, speaker, boundary, toggle, stop, play, minutes, setSleepTimer, clock, seek, buffered }
+    rate, setRate, state, speaker, boundary, toggle, stop, play, minutes, setSleepTimer, clock, seek, buffered, preparation, prepareKokoro }
 }
