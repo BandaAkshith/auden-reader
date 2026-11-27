@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { makeClip, naturalClip, nextReadable, positionInClip, type Clip, type NaturalClip, type Position } from './playbackClips'
+import { delivery, deliveryFor, makeClip, naturalClip, nextReadable, positionInClip, spokenText, trimAudioPadding, type Clip, type NaturalClip, type Position } from './playbackClips'
 import { profileKey } from './accounts'
 import { usePreference } from './readerPreferences'
 import { naturalVoices, type NaturalVoice } from './voiceCatalog'
@@ -8,12 +8,21 @@ export type { Position } from './playbackClips'
 type AudioData = { samples: Float32Array; sampleRate: number }
 type State = 'idle' | 'loading' | 'buffering' | 'playing' | 'paused'
 type Engine = 'auto' | 'natural' | 'device'
-type Pending = { resolve: (data?: AudioData) => void; reject: (error: Error) => void; progress: (status: string) => void; timeout: number }
+type Lane = 0 | 1
+type Pending = { lane: Lane; resolve: (data?: AudioData) => void; reject: (error: Error) => void; progress: (status: string) => void; timeout: number }
 type SpeechClip = Clip | NaturalClip
-type Prediction = { clip: SpeechClip; rate: number; promise: Promise<AudioData | null>; result?: AudioData | null }
+type Prediction = { clip: SpeechClip; rate: number; lane: Lane; promise: Promise<AudioBuffer | null>; result?: AudioBuffer | null }
+type PlayingAudio = { buffer: AudioBuffer; offset: number; start: number; ended: () => void; progress: (seconds: number) => void; schedule: () => void }
+type ScheduledAudio = { job: Prediction; node: AudioBufferSourceNode; time: number }
 
 const sample = 'The lights in the reading room flickered. “Did you hear that?” Mira whispered, setting her book down.'
 const order = (a: Position, b: Position) => a.index - b.index || a.offset - b.offset
+
+function canRenderInParallel() {
+  const memory = (navigator as Navigator & { deviceMemory?: number }).deviceMemory
+  const desktopMac = /Macintosh/i.test(navigator.userAgent) && navigator.maxTouchPoints < 2
+  return navigator.hardwareConcurrency >= 6 && (memory === undefined ? desktopMac : memory >= 8)
+}
 
 function resumeAudio(context: AudioContext): Promise<void> {
   if (context.state === 'running') return Promise.resolve()
@@ -58,8 +67,10 @@ export function useNarration(passages: string[], onPosition: (point: Position) =
   const generation = useRef(0)
   const context = useRef<AudioContext | null>(null)
   const source = useRef<AudioBufferSourceNode | null>(null)
-  const audio = useRef<{ buffer: AudioBuffer; offset: number; start: number; ended: () => void; progress: (seconds: number) => void } | null>(null)
-  const worker = useRef<Worker | null>(null)
+  const audio = useRef<PlayingAudio | null>(null)
+  const scheduled = useRef<ScheduledAudio | null>(null)
+  const workers = useRef<[Worker | null, Worker | null]>([null, null])
+  const parallelFailed = useRef(false)
   const warm = useRef<Promise<void> | null>(null)
   const warmReady = useRef(false)
   const requestId = useRef(0)
@@ -96,12 +107,25 @@ export function useNarration(passages: string[], onPosition: (point: Position) =
     return () => window.clearInterval(interval)
   }, [state, speaker])
 
+  useEffect(() => {
+    audio.current?.schedule()
+  }, [autoplay, rate])
+
   function elapsed() {
     const sound = audio.current
     return sound ? Math.min(sound.buffer.duration, sound.offset + (source.current ? context.current!.currentTime - sound.start : 0)) : 0
   }
 
+  function cancelScheduled() {
+    const queued = scheduled.current
+    if (!queued) return
+    queued.node.stop()
+    queued.node.disconnect()
+    scheduled.current = null
+  }
+
   function stopSource() {
+    cancelScheduled()
     if (!source.current) return
     source.current.onended = null
     source.current.stop()
@@ -116,7 +140,7 @@ export function useNarration(passages: string[], onPosition: (point: Position) =
   }
 
   function stop() {
-    worker.current?.postMessage({ kind: 'cancel', session: generation.current })
+    for (const worker of workers.current) worker?.postMessage({ kind: 'cancel', session: generation.current })
     generation.current++
     transport.current = undefined
     previewAudio.current?.pause()
@@ -134,6 +158,7 @@ export function useNarration(passages: string[], onPosition: (point: Position) =
   function setSleepTimer(value: number) {
     window.clearTimeout(timer.current)
     chapterStop.current = value === -1 ? nextChapter ?? passages.length : undefined
+    audio.current?.schedule()
     setMinutes(value)
     if (value > 0) timer.current = window.setTimeout(() => {
       stop()
@@ -142,20 +167,27 @@ export function useNarration(passages: string[], onPosition: (point: Position) =
     }, value * 60_000)
   }
 
-  function releaseWorker(error: Error) {
-    worker.current?.terminate()
-    worker.current = null
-    warm.current = null
-    warmReady.current = false
-    for (const request of pending.current.values()) {
+  function releaseWorker(error: Error, lane?: Lane) {
+    if (lane !== 1) {
+      workers.current[0]?.terminate()
+      workers.current[0] = null
+      warm.current = null
+      warmReady.current = false
+    }
+    if (lane !== 0) {
+      workers.current[1]?.terminate()
+      workers.current[1] = null
+    }
+    for (const [id, request] of pending.current) {
+      if (lane !== undefined && request.lane !== lane) continue
       window.clearTimeout(request.timeout)
       request.reject(error)
+      pending.current.delete(id)
     }
-    pending.current.clear()
   }
 
-  function request(kind: 'prepare' | 'synthesize', session: number, voice: NaturalVoice, reportStatus: boolean, text?: string, speed?: number) {
-    if (!worker.current) {
+  function request(kind: 'prepare' | 'synthesize', session: number, voice: NaturalVoice, reportStatus: boolean, text?: string, speed?: number, lane: Lane = 0) {
+    if (!workers.current[lane]) {
       const instance = new Worker(new URL('./narration.worker.ts', import.meta.url), { type: 'module' })
       instance.onmessage = ({ data }) => {
         const request = pending.current.get(data.id)
@@ -168,22 +200,22 @@ export function useNarration(passages: string[], onPosition: (point: Position) =
         else request.resolve(data.samples ? data : undefined)
       }
       instance.onerror = () => {
-        if (worker.current !== instance) return
-        releaseWorker(new Error('The voice worker could not start.'))
-        setPreparation('idle')
+        if (workers.current[lane] !== instance) return
+        releaseWorker(new Error('The voice worker could not start.'), lane)
+        if (lane === 0) setPreparation('idle')
       }
-      worker.current = instance
+      workers.current[lane] = instance
     }
     const id = ++requestId.current
     return new Promise<AudioData | undefined>((resolve, reject) => {
       const timeout = window.setTimeout(() => {
-        releaseWorker(new Error('Kokoro took too long to prepare.'))
-        setPreparation('idle')
+        releaseWorker(new Error('Kokoro took too long to prepare.'), lane)
+        if (lane === 0) setPreparation('idle')
       }, 150_000)
-      pending.current.set(id, { resolve, reject, timeout, progress: status => {
+      pending.current.set(id, { lane, resolve, reject, timeout, progress: status => {
         if (reportStatus && session === generation.current) config.current.report(status)
       } })
-      worker.current!.postMessage({ kind, id, session, text, voice, speed })
+      workers.current[lane]!.postMessage({ kind, id, session, text, voice, speed })
     })
   }
 
@@ -213,16 +245,19 @@ export function useNarration(passages: string[], onPosition: (point: Position) =
     }
   }
 
-  function startBuffer(offset: number) {
+  function startBuffer(offset: number, prepared?: ScheduledAudio) {
     const sound = audio.current
     const ctx = context.current
     if (!sound || !ctx) return
-    stopSource()
+    if (prepared) scheduled.current = null
+    else stopSource()
     sound.offset = Math.min(Math.max(0, offset), Math.max(0, sound.buffer.duration - .02))
-    sound.start = ctx.currentTime
-    const node = ctx.createBufferSource()
-    node.buffer = sound.buffer
-    node.connect(ctx.destination)
+    sound.start = prepared?.time ?? ctx.currentTime
+    const node = prepared?.node ?? ctx.createBufferSource()
+    if (!prepared) {
+      node.buffer = sound.buffer
+      node.connect(ctx.destination)
+    }
     node.onended = () => {
       if (source.current !== node) return
       source.current = null
@@ -230,10 +265,11 @@ export function useNarration(passages: string[], onPosition: (point: Position) =
       sound.ended()
     }
     source.current = node
-    node.start(0, sound.offset)
+    if (!prepared) node.start(0, sound.offset)
     setClock({ elapsed: sound.offset, duration: sound.buffer.duration })
     setSpeaker('natural')
     setState('playing')
+    sound.schedule()
   }
 
   function playPreview() {
@@ -284,7 +320,7 @@ export function useNarration(passages: string[], onPosition: (point: Position) =
     let modelFailed = false
     let current: SpeechClip
     let bufferQueue: Prediction[] = []
-    let inFlight: Prediction | undefined
+    const inFlight: [Prediction?, Prediction?] = []
     let lookahead = 1
     let highlighted: Position | undefined
     let completed = false
@@ -302,10 +338,10 @@ export function useNarration(passages: string[], onPosition: (point: Position) =
       void context.current.resume().catch(() => undefined)
     }
 
-    function nextClip(origin: Position, maximumSentences = 5) {
+    function nextClip(origin: Position, maximumSentences = 5, maximumCharacters = 220) {
       const next = nextReadable(passages, origin, config.current.shouldSkip)
       if (chapterStop.current !== undefined && next.index >= chapterStop.current) return
-      return natural ? naturalClip(passages, next, config.current.shouldSkip, chapterStop.current, maximumSentences) : makeClip(passages, next)
+      return natural ? naturalClip(passages, next, config.current.shouldSkip, chapterStop.current, maximumSentences, maximumCharacters) : makeClip(passages, next)
     }
 
     function finish() {
@@ -320,40 +356,91 @@ export function useNarration(passages: string[], onPosition: (point: Position) =
         ? ('sentences' in job.clip ? job.clip.sentences : 1) : 0), 0))
     }
 
-    function queue(clip: SpeechClip, visible: boolean): Prediction {
+    function queue(clip: SpeechClip, visible: boolean, lane: Lane = 0): Prediction {
       const requestedRate = config.current.rate
+      const parts = 'parts' in clip ? clip.parts : [clip]
+      const text = parts.map(part => {
+        const index = part.point.index
+        const nearby = passages[index].slice(Math.max(0, part.point.offset - 100), part.end + 180)
+        return spokenText(part.text, nearby + ' ' + (passages[index + 1]?.slice(0, 120) || ''))
+      }).join(' ')
+      const style = delivery[deliveryFor(clip.text)]
       const job: Prediction = {
-        clip, rate: requestedRate,
-        promise: request('synthesize', session, naturalVoice, visible, clip.text, requestedRate)
-          .then(data => data || null).catch(() => null),
+        clip, rate: requestedRate, lane,
+        promise: Promise.resolve().then(() => stillHere()
+          ? request('synthesize', session, naturalVoice, visible, text, requestedRate * style.pace, lane)
+          : null)
+          .then(data => {
+            if (!data || !stillHere()) return null
+            const samples = trimAudioPadding(data.samples, data.sampleRate)
+            const buffer = context.current!.createBuffer(1, samples.length, data.sampleRate)
+            const channel = buffer.getChannelData(0)
+            channel.set(samples)
+            if (style.volume !== 1) {
+              for (let i = 0; i < channel.length; i++) channel[i] *= style.volume
+            }
+            return buffer
+          }).catch(() => {
+            if (lane === 1 && stillHere()) {
+              parallelFailed.current = true
+              releaseWorker(new Error('Parallel rendering is unavailable.'), lane)
+            }
+            return null
+          }),
       }
-      inFlight = job
+      inFlight[lane] = job
       void job.promise.then(data => {
         job.result = data
-        if (inFlight === job) inFlight = undefined
+        if (inFlight[lane] === job) inFlight[lane] = undefined
         if (!stillHere() || !current || !bufferQueue.includes(job)) return
         if (automatic && order(job.clip.point, current.point) <= 0 && usedDevice) {
           bufferQueue = bufferQueue.filter(item => item !== job)
           lookahead = Math.min(lookahead + 1, 3)
         }
         updateBuffer()
-        if (data) prefetch()
+        if (data || lane === 1) prefetch()
       })
       return job
     }
 
     function prefetch() {
-      if (!stillHere() || !current || !natural || modelFailed || !warmReady.current || !config.current.autoplay) return
+      if (!stillHere() || !current || !natural || modelFailed || !warmReady.current) return
       bufferQueue = bufferQueue.filter(job => job.rate === config.current.rate &&
         order(job.clip.point, current.point) > 0 && job.result !== null)
       updateBuffer()
-      if (inFlight || bufferQueue.length >= 2) return
-      const latest = bufferQueue.at(-1)
-      let candidate = nextClip((latest?.clip || current).next)
-      for (let ahead = 1; automatic && !latest && usedDevice && candidate && ahead < lookahead; ahead++) {
+      scheduleNext()
+      if (!config.current.autoplay || bufferQueue.length >= 3) return
+      let candidate = nextClip(current.next)
+      for (let ahead = 1; automatic && usedDevice && candidate && ahead < lookahead; ahead++) {
         candidate = nextClip(candidate.next)
       }
-      if (candidate) bufferQueue.push(queue(candidate, false))
+      const parallel = !automatic && !parallelFailed.current && canRenderInParallel()
+      for (const lane of parallel ? [0, 1] as const : [0] as const) {
+        if (inFlight[lane] || bufferQueue.length >= 3) continue
+        while (candidate && bufferQueue.some(item => order(item.clip.point, candidate!.point) === 0)) {
+          candidate = nextClip(candidate.next)
+        }
+        if (candidate) bufferQueue.push(queue(candidate, false, lane))
+      }
+    }
+
+    function scheduleNext() {
+      const ctx = context.current
+      const sound = audio.current
+      const playing = source.current
+      const next = config.current.autoplay && nextClip(current.next)
+      const job = next && bufferQueue.find(item => item.rate === config.current.rate && item.result &&
+        order(item.clip.point, next.point) === 0)
+      if (scheduled.current?.job === job) return
+      cancelScheduled()
+      if (!ctx || !sound || !playing || paused || !job || !job.result) return
+      const time = sound.start + sound.buffer.duration - sound.offset
+      if (time <= ctx.currentTime) return
+      const node = ctx.createBufferSource()
+      node.buffer = job.result
+      node.connect(ctx.destination)
+      node.start(time)
+      scheduled.current = { job, node, time }
     }
 
     function highlight(clip: SpeechClip, offset: number, wordLength?: number) {
@@ -372,6 +459,7 @@ export function useNarration(passages: string[], onPosition: (point: Position) =
       const next = nextClip(clip.next)
       if (!next) { finish(); return }
       if (config.current.autoplay) { advance(next); return }
+      cancelScheduled()
       completed = true
       audio.current = null
       setClock({ elapsed: 0, duration: 0 })
@@ -385,12 +473,14 @@ export function useNarration(passages: string[], onPosition: (point: Position) =
       usedDevice = true
       if (!synth || !voice) { stop(); report('No on-device voice is available.'); return }
       let spoken = offset
-      const nextPartStart = 'parts' in clip ? clip.parts.find(part => part.at > offset)?.at : undefined
-      const item = new SpeechSynthesisUtterance(clip.text.slice(offset, nextPartStart))
+      const item = new SpeechSynthesisUtterance(clip.text.slice(offset))
+      const style = delivery[deliveryFor(clip.text)]
       highlight(clip, offset)
       item.voice = voice
       item.lang = voice.lang
-      item.rate = config.current.rate
+      item.rate = config.current.rate * style.pace
+      item.pitch = style.pitch
+      item.volume = style.volume
       item.onboundary = event => {
         if (utterance.current !== item || event.name !== 'word' || event.charIndex < 0 || event.charIndex >= item.text.length) return
         spoken = offset + event.charIndex
@@ -400,8 +490,7 @@ export function useNarration(passages: string[], onPosition: (point: Position) =
       item.onend = () => {
         if (utterance.current !== item) return
         utterance.current = null
-        if (nextPartStart !== undefined) speak(clip, nextPartStart, allowFallback)
-        else complete(clip)
+        complete(clip)
       }
       item.onerror = () => {
         if (utterance.current !== item || !stillHere()) return
@@ -423,20 +512,16 @@ export function useNarration(passages: string[], onPosition: (point: Position) =
     function startNatural(clip: SpeechClip, job?: Prediction) {
       usedDevice = false
       const ctx = context.current!
-      setSpeaker(null)
-      setState(paused ? 'paused' : clip === first ? 'loading' : 'buffering')
+      const prepared = scheduled.current?.job === job && scheduled.current ? scheduled.current : undefined
+      if (!prepared) {
+        setSpeaker(null)
+        setState(paused ? 'paused' : clip === first ? 'loading' : 'buffering')
+      }
       pauseStep = () => {}
       resumeStep = () => setState(clip === first ? 'loading' : 'buffering')
-      void prepareModel(session, !automatic).then(() => {
-        if (!stillHere()) return null
-        return (job?.rate === config.current.rate ? job : queue(clip, !automatic)).promise
-      }).then(data => {
-        if (!stillHere()) return
-        if (!data) throw new Error('Audio could not be rendered.')
-        const buffer = ctx.createBuffer(1, data.samples.length, data.sampleRate)
-        buffer.getChannelData(0).set(data.samples)
+      function useBuffer(buffer: AudioBuffer) {
         let prior = -1
-        audio.current = { buffer, offset: 0, start: 0, ended: () => complete(clip), progress: seconds => {
+        audio.current = { buffer, offset: 0, start: 0, ended: () => complete(clip), schedule: prefetch, progress: seconds => {
           if (!('parts' in clip)) return
           const offset = Math.floor(clip.text.length * Math.min(.999, seconds / buffer.duration))
           const { part } = positionInClip(clip, offset)
@@ -468,8 +553,23 @@ export function useNarration(passages: string[], onPosition: (point: Position) =
         pauseStep = () => { if (audio.current) audio.current.offset = elapsed(); stopSource() }
         setClock({ elapsed: 0, duration: buffer.duration })
         updateBuffer()
-        if (!paused) resumeStep()
+        if (prepared) startBuffer(0, prepared)
+        else if (!paused) resumeStep()
         prefetch()
+      }
+      if (job?.result) { useBuffer(job.result); return }
+      void prepareModel(session, !automatic).then(() => {
+        if (!stillHere()) return null
+        if (job?.rate !== config.current.rate) {
+          const active = queue(clip, !automatic)
+          prefetch()
+          return active.promise
+        }
+        return job.promise.then(buffer => buffer || (stillHere() && job.lane === 1 ? queue(clip, !automatic).promise : null))
+      }).then(buffer => {
+        if (!stillHere()) return
+        if (!buffer) throw new Error('Audio could not be rendered.')
+        useBuffer(buffer)
       }).catch(() => {
         if (!stillHere()) return
         if (automatic) {
@@ -498,7 +598,7 @@ export function useNarration(passages: string[], onPosition: (point: Position) =
       speak(clip, 0, automatic && !modelFailed)
     }
 
-    const first = nextClip(point, natural && !automatic ? 1 : 5)
+    const first = nextClip(point, natural && !automatic ? 1 : 5, natural && !automatic ? 115 : 220)
     if (!first) { finish(); return }
     transport.current = {
       paused: false,

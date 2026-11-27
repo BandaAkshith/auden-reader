@@ -740,7 +740,7 @@ function Reader({ book, passages, dark, toggleTheme, save, onBack }: {
         </div>
         {narration.engine !== 'device' && <p className="narration-help">{narration.engine === 'auto'
           ? 'Automatic starts with a device voice when needed and switches to Kokoro when a clip is ready.'
-          : 'Kokoro prepares audio on this device. Its first use needs a model download.'}</p>}
+          : 'Kokoro queues audio ahead and joins ready clips continuously. The first use needs a model download.'}</p>}
       </>}
       {narration.buffered > 0 && <div className="reader-message"><Check size={14}/> {narration.buffered} {narration.buffered === 1 ? 'sentence' : 'sentences'} ready ahead</div>}
       {(message || !narration.supported) && <div className="reader-message" role="status"><Check size={14}/>{message || 'Narration is unavailable in this browser.'}</div>}

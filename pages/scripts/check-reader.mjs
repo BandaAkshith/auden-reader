@@ -16,7 +16,7 @@ try {
   }
 
   const { paginate, bookStructure } = await import(pathToFileURL(join(temporary, 'readingLayout.mjs')))
-  const { makeClip, nextReadable, naturalClip, positionInClip } = await import(pathToFileURL(join(temporary, 'playbackClips.mjs')))
+  const { makeClip, nextReadable, naturalClip, positionInClip, spokenText, deliveryFor, trimAudioPadding } = await import(pathToFileURL(join(temporary, 'playbackClips.mjs')))
   const passages = ['Chapter 1: Arrival', 'Part I: The Harbor', 'A long line with words in it. '.repeat(90),
     'Chapter 2: Departure', 'Part II: The Coast', 'Then the ship left. '.repeat(80), 'Afterword', 'Appendix']
   const structure = bookStructure(passages)
@@ -68,6 +68,21 @@ try {
   assert.equal(positionInClip(group, group.parts[3].at + 4).offset, 4)
   assert.equal(naturalClip(short, { index: 0, offset: 0 }, () => false, 2).sentences, 2)
   assert.equal(naturalClip(short, { index: 0, offset: 0 }, index => index === 2).parts[2].point.index, 3)
+  const first = naturalClip(long, { index: 0, offset: 0 }, () => false, undefined, 1, 45)
+  assert(first.text.length <= 45)
+  assert.equal(long[0].slice(first.next.offset), long[0].slice(first.text.length))
+  const dialogue = ['The hall was quiet.', '“Go away,” he shouted.', '“I miss her,” she said through tears.']
+  assert.equal(naturalClip(dialogue, { index: 0, offset: 0 }, () => false).sentences, 1)
+  assert.equal(deliveryFor(dialogue[1]), 'emphatic')
+  assert.equal(deliveryFor(dialogue[2]), 'sad')
+  assert.equal(deliveryFor('The window snapped shut.'), 'plain')
+  assert.equal(spokenText('Chu chu!', 'The train left the station.'), 'Choo-choo!')
+  assert.equal(spokenText('Tuk tuk.', 'She knocked on the door.'), 'Tuck. Tuck.')
+  assert.equal(spokenText('Tuk tuk passed by.', 'We were stuck in traffic.'), 'Tuk tuk passed by.')
+  const signal = new Float32Array(1000)
+  signal.fill(.5, 350, 450)
+  assert.equal(trimAudioPadding(signal, 1000).length, 235)
+  assert.equal(trimAudioPadding(new Float32Array(100), 1000).length, 100)
   console.log('Reader regression checks passed.')
 } finally {
   await rm(temporary, { recursive: true, force: true })

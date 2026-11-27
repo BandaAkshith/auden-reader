@@ -77,13 +77,11 @@ scope.onmessage = ({ data: { kind, id, session, text, voice, speed } }) => {
         },
       }).then(engine => new BrowserKokoro(engine.model, engine.tokenizer))
         .catch(error => { model = undefined; throw error })
-      const engine = await model
+      const [engine] = await Promise.all([model, loadVoice(voice)])
       if (kind === 'prepare') { scope.postMessage({ id, ready: true }); return }
-      scope.postMessage({ id, phase: 'Loading voice…' })
-      await loadVoice(voice)
       scope.postMessage({ id, phase: 'Generating audio…' })
       const result = await engine.generate(text, { voice, speed })
-      const samples = Float32Array.from(result.audio)
+      const samples = result.audio
       if (!samples.length) throw new Error('The voice returned empty audio.')
       scope.postMessage({ id, samples, sampleRate: result.sampling_rate }, [samples.buffer])
     } catch (error) {
