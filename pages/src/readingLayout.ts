@@ -45,24 +45,89 @@ export function bookStructure(passages: string[], importedHeadings?: number[]) {
   return { opening, printedPassages, printed, targetFor: (entry: string) => targets.get(chapterKey(entry) || '') }
 }
 
+export type PageFragment = { index: number; from: number; to: number }
+
 export function paginate(passages: string[], structure: ReturnType<typeof bookStructure>, characters: number, lines: number) {
-  const starts = [0]
-  const lookup = new Uint32Array(passages.length)
+  const leaves: PageFragment[][] = []
+  let fragments: PageFragment[] = []
   let used = 0
-  for (let index = 0; index < passages.length; index++) {
-    const heading = structure.opening.has(index)
-    const rows = structure.printedPassages.get(index)
-    const cost = rows
-      ? Math.min(lines, rows.reduce((sum, row) => sum + Math.max(1, Math.ceil(row.length / characters)), 0))
-      : Math.max(1, Math.ceil(passages[index].length / characters)) + (heading ? 2 : 0.55)
-    if (index && (heading || (used + cost > lines && used > 0 && !structure.opening.has(index - 1)))) {
-      starts.push(index)
-      used = 0
-    }
-    used += cost
-    lookup[index] = starts.length - 1
+  let hasBody = false
+  let pendingHeading = false
+  let lastBody = passages.length - 1
+  while (lastBody >= 0 && (structure.opening.has(lastBody) || lastBody === structure.printed)) lastBody--
+
+  function turn() {
+    if (!fragments.length) return
+    leaves.push(fragments)
+    fragments = []
+    used = 0
+    hasBody = false
+    pendingHeading = false
   }
-  return { starts, lookup }
+
+  function add(index: number, from: number, to: number, cost: number) {
+    fragments.push({ index, from, to })
+    used += cost
+  }
+
+  for (let index = 0; index < passages.length; index++) {
+    const text = passages[index]
+    const heading = structure.opening.has(index) || index === structure.printed
+    const rows = structure.printedPassages.get(index)
+    if (heading) {
+      const cost = Math.ceil(text.length / Math.max(12, characters * .76)) + 1.75
+      const hasFollowingText = index < lastBody
+      // Keep a run of headings with its first paragraph. A closing heading
+      // stays with the preceding page even when the document ends there.
+      if (hasBody && !pendingHeading && hasFollowingText && (used >= lines * .5 || used + cost + 5 > lines)) turn()
+      add(index, 0, text.length, cost)
+      pendingHeading = true
+      continue
+    }
+    if (rows) {
+      const cost = rows.reduce((sum, row) => sum + Math.max(1, Math.ceil(row.length / characters)) + .3, 0)
+      if (hasBody && !pendingHeading && used + cost > lines) turn()
+      add(index, 0, text.length, cost)
+      hasBody = true
+      pendingHeading = false
+      continue
+    }
+
+    let from = 0
+    while (from < text.length) {
+      let available = Math.floor(lines - used - .35)
+      if (available < 3 && hasBody && !pendingHeading) { turn(); available = Math.floor(lines - .35) }
+      const capacity = Math.max(3, available) * characters
+      let to = Math.min(text.length, from + capacity)
+      if (to < text.length) {
+        // Split at a nearby word boundary while keeping original offsets for
+        // existing bookmarks, narration positions, and exact page jumps.
+        const window = text.slice(Math.max(from, to - characters), to)
+        const boundary = Math.max(window.lastIndexOf(' '), window.lastIndexOf('\n'))
+        if (boundary >= 0) to -= window.length - boundary - 1
+      }
+      add(index, from, to, Math.max(1, Math.ceil((to - from) / characters)) + .35)
+      hasBody = true
+      pendingHeading = false
+      from = to
+      if (from < text.length) turn()
+    }
+  }
+  turn()
+
+  function pageAt(index: number, offset = 0) {
+    let start = 0
+    let end = leaves.length - 1
+    while (start < end) {
+      const middle = Math.ceil((start + end) / 2)
+      const first = leaves[middle][0]
+      if (first.index < index || (first.index === index && first.from <= offset)) start = middle
+      else end = middle - 1
+    }
+    return start
+  }
+
+  return { leaves, pageAt }
 }
 
 const segmenter = typeof Intl.Segmenter === 'function' ? new Intl.Segmenter(undefined, { granularity: 'sentence' }) : null

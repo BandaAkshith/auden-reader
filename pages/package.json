@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -p tsconfig.json && vite build && node scripts/cache-site.mjs",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:reader": "node scripts/check-reader.mjs"
   },
   "dependencies": {
     "@vitejs/plugin-react": "latest",

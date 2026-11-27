@@ -6,7 +6,7 @@ import { naturalVoices, type NaturalVoice } from './voiceCatalog'
 
 const scope = self as unknown as {
   postMessage(message: unknown, transfer?: Transferable[]): void
-  onmessage: (event: MessageEvent<{ id: number; text: string; voice: NaturalVoice; speed: number }>) => void
+  onmessage: (event: MessageEvent<{ kind: 'prepare' | 'synthesize' | 'cancel'; id: number; session: number; text?: string; voice: NaturalVoice; speed?: number }>) => void
 }
 
 env.allowLocalModels = false
@@ -53,9 +53,18 @@ class BrowserKokoro extends KokoroTTS {
 let activeRequest = -1
 let model: Promise<KokoroTTS> | undefined
 let queue = Promise.resolve()
+let cancelledThrough = -1
 
-scope.onmessage = ({ data: { id, text, voice, speed } }) => {
+scope.onmessage = ({ data: { kind, id, session, text, voice, speed } }) => {
+  if (kind === 'cancel') {
+    cancelledThrough = Math.max(cancelledThrough, session)
+    return
+  }
   queue = queue.then(async () => {
+    if (kind === 'synthesize' && session <= cancelledThrough) {
+      scope.postMessage({ id, error: 'Narration changed position.' })
+      return
+    }
     activeRequest = id
     try {
       model ??= KokoroTTS.from_pretrained('onnx-community/Kokoro-82M-v1.0-ONNX', {
@@ -69,6 +78,7 @@ scope.onmessage = ({ data: { id, text, voice, speed } }) => {
       }).then(engine => new BrowserKokoro(engine.model, engine.tokenizer))
         .catch(error => { model = undefined; throw error })
       const engine = await model
+      if (kind === 'prepare') { scope.postMessage({ id, ready: true }); return }
       scope.postMessage({ id, phase: 'Loading voice…' })
       await loadVoice(voice)
       scope.postMessage({ id, phase: 'Generating audio…' })
