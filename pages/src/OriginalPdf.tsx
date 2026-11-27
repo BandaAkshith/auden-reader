@@ -3,10 +3,10 @@ import type { PDFDocumentProxy } from 'pdfjs-dist'
 import { readOriginal } from './library'
 import { loadPdf } from './pdf'
 
-export default function OriginalPdf({ id }: { id: string }) {
+export default function OriginalPdf({ id, initialPage = 1 }: { id: string; initialPage?: number }) {
   const canvas = useRef<HTMLCanvasElement>(null)
   const [pdf, setPdf] = useState<PDFDocumentProxy>()
-  const [page, setPage] = useState(1)
+  const [page, setPage] = useState(initialPage)
   const [error, setError] = useState('')
 
   useEffect(() => {
@@ -17,14 +17,14 @@ export default function OriginalPdf({ id }: { id: string }) {
         const file = await readOriginal(id)
         if (!file) throw new Error('The original PDF is unavailable.')
         document = await loadPdf(file)
-        if (active) setPdf(document.pdf)
+        if (active) { setPdf(document.pdf); setPage(Math.min(initialPage, document.pdf.numPages)) }
         else await document.close()
       } catch {
         if (active) setError('Auden could not load the original PDF.')
       }
     })()
     return () => { active = false; if (document) void document.close() }
-  }, [id])
+  }, [id, initialPage])
 
   useEffect(() => {
     if (!pdf) return

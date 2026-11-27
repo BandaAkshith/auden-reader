@@ -1,5 +1,7 @@
 export type Format = 'PDF' | 'EPUB' | 'DOCX' | 'TXT'
 
+export type OutlineEntry = { title: string; sourcePage: number; depth: number; index?: number }
+
 export type Book = {
   id: string
   title: string
@@ -9,8 +11,10 @@ export type Book = {
   addedAt: number
   openedAt?: number
   cursor: number
+  cursorOffset?: number
   bookmarks: number[]
   headings?: number[]
+  outline?: OutlineEntry[]
   notes: { id: string; cursor: number; body: string }[]
 }
 
@@ -93,7 +97,7 @@ export function storeBook(entry: ImportedBook) {
   return storeBooks([entry])
 }
 
-export async function updateBook(id: string, patch: Partial<Pick<Book, 'cursor' | 'openedAt' | 'bookmarks' | 'notes'>>) {
+export async function updateBook(id: string, patch: Partial<Pick<Book, 'cursor' | 'cursorOffset' | 'openedAt' | 'bookmarks' | 'notes'>>) {
   const db = await openLibrary()
   const transaction = db.transaction('books', 'readwrite')
   const done = committed(transaction)

@@ -24,3 +24,9 @@ PDF imports require an extractable text layer. EPUB imports support text in stan
 The reader offers a single page, a two-page spread, and a continuous view with up to 40 passages per section. Auden detects common chapter titles and uses heading structure from EPUB and DOCX where available. Display and narration preferences are remembered on the device. Word highlighting depends on the device voice reporting speech boundaries.
 
 Reading insights measure time while the reader is visible, with a weekly summary and CSV export. A library backup ZIP includes extracted document text, original PDFs, saved positions, bookmarks, and notes. Restoring a browser backup adds missing document IDs and leaves existing documents in place. The desktop FastAPI account backup is a separate format.
+
+## Audiobook player
+
+Choose **Kokoro natural** for 11 American and British English voices, or **Device speech** for voices installed on the device. Voice previews play a short, bundled Kokoro sample immediately. The first Kokoro book playback downloads the approximately 92 MB quantized model from Hugging Face. Auden generates audio locally in a worker and keeps upcoming clips in memory while listening. Browser or device performance can affect the wait between clips. Kokoro highlights the active clip; device voices can also report exact word boundaries.
+
+Tap a sentence to begin listening there. The player saves that position, can seek within the current Kokoro clip, and includes a sleep timer that can stop at the end of a chapter. PDF navigation uses the PDF's own bookmarks when available and recognizes printed contents pages even in older imports. Auden's light/dark switch applies across the library and reader.

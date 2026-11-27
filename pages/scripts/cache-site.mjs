@@ -7,6 +7,7 @@ const dist = new URL('../dist/', import.meta.url)
 const files = (await readdir(dist, { recursive: true, withFileTypes: true }))
   .filter(entry => entry.isFile() && entry.name !== 'sw.js')
   .map(entry => relative(fileURLToPath(dist), join(entry.parentPath, entry.name)).replaceAll('\\', '/'))
+  .filter(file => !file.endsWith('.wasm') && !file.endsWith('.bin') && !/narration.worker|onnx|ort-wasm/.test(file))
   .sort()
 const hash = createHash('sha256')
 for (const file of files) {

@@ -193,3 +193,67 @@ progress::-webkit-progress-value { background: #557760 }
   .reader-pages.spread { grid-template-columns: 1fr }
   .reader-pages.spread > div + div { border-inline-start: 0; border-top: 1px solid var(--line); padding-inline-start: 0; padding-top: 9px }
 }
+
+.theme-button { min-height: 39px; min-width: 40px }
+.masthead-end { gap: 9px }
+.quick-pages { margin: 13px 0 9px }
+.quick-pages button { min-width: 95px }
+.contents-panel .search { margin-top: 10px }
+.contents-heading { display: flex; align-items: start; justify-content: space-between; gap: 12px }
+.contents-list { margin: 12px 0 0; padding: 0; list-style: none; max-height: min(52vh, 520px); overflow: auto }
+.contents-list li + li { border-top: 1px solid var(--line) }
+.contents-list button { width: 100%; display: flex; align-items: baseline; justify-content: space-between; gap: 10px; border: 0; border-radius: 6px; padding: 10px; background: transparent; text-align: left }
+.contents-list button:hover, .contents-list button[aria-current] { background: var(--highlight, #e8ede3) }
+.contents-list small { color: var(--muted); white-space: nowrap }
+.printed-contents { list-style: none; padding: 0; margin: 4px 0 14px }
+.printed-contents li + li { border-top: 1px dotted currentColor }
+.printed-contents li { font-size: .9em; line-height: 1.35 }
+.printed-contents :is(button,span) { display: block; text-align: left; width: 100%; padding: 5px 8px; border: 0; background: transparent }
+.printed-contents button:hover { background: var(--highlight, #e8ede3); text-decoration: underline }
+.read-sentence { border-radius: 3px; cursor: pointer }
+.read-sentence:focus-visible { outline: 2px solid #997138; outline-offset: 2px }
+@media (hover: hover) { .read-sentence:hover { text-decoration: underline dotted; text-underline-offset: .22em } }
+.clip-controls { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: .8rem; margin-top: 8px }
+.clip-controls input { min-width: 0; flex: 1; accent-color: var(--green) }
+.clip-controls .icon-button { min-width: 38px; min-height: 34px }
+.narration-help { color: var(--muted); font-size: .78rem; margin-top: 8px }
+.reading-paper { min-height: 250px }
+@media(max-height: 680px) {
+  .player-options { max-height: 150px; overflow: auto }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --ink: #eee7d8;
+  --muted: #c0bcad;
+  --green: #a9cfb3;
+  --cream: #191e1b;
+  --line: #404942;
+  --white: #242c27;
+  --highlight: #34463a;
+}
+:root[data-theme="dark"] :is(.brand-mark,.primary,.player-icon) { background: #3b624a; color: #fff8e9 }
+:root[data-theme="dark"] .primary:hover:not(:disabled) { background: #4a7358 }
+:root[data-theme="dark"] :is(.secondary,.icon-button):hover:not(:disabled),
+:root[data-theme="dark"] :is(.secondary,.icon-button)[aria-pressed="true"] { background: #38493f; color: var(--green); border-color: #51675a }
+:root[data-theme="dark"] .hero { background: #303a30; border-color: #4b554a }
+:root[data-theme="dark"] .hero-art { background: linear-gradient(120deg,#303a30,#4b4f42) }
+:root[data-theme="dark"] .hero h1 em { color: #bdcfad }
+:root[data-theme="dark"] .hero p { color: var(--muted) }
+:root[data-theme="dark"] :is(.library-heading h2 span,.empty-icon,.insight-track) { background: #354037 }
+:root[data-theme="dark"] .insight-track i { background: #a2bc9f }
+:root[data-theme="dark"] .notice { background: #35463a }
+:root[data-theme="dark"] .notice.error { background: #4d302c; color: #ffd6cb }
+:root[data-theme="dark"] .drop-area.dragging { background: #38483d }
+:root[data-theme="dark"] .reading-paper.match [aria-current] { background: #364b3c }
+:root[data-theme="dark"] .reading-paper:is(.white,.parchment,.contrast) { color: #2b2b21; background: #fff9ef }
+:root[data-theme="dark"] .reading-paper.white { background: #fff }
+:root[data-theme="dark"] .reading-paper:is(.white,.parchment,.contrast) button:not(.secondary) { color: #2b2b21 }
+.page-jump { display: flex; gap: 3px; align-items: center }
+.quick-pages .page-jump button { min-width: 0 }
+.page-jump input { border: 1px solid var(--line); border-radius: 7px; min-width: 0; width: 4.3em; padding: 6px; background: var(--white); color: var(--ink) }
+@media (max-width: 540px) {
+  .quick-pages { display: grid; grid-template-columns: auto 1fr auto; justify-items: center }
+  .quick-pages .page-jump { grid-row: 2; grid-column: 1 / -1 }
+  .quick-pages > button:last-child { grid-column: 3; grid-row: 1 }
+  .quick-pages button { min-width: 0 }
+}

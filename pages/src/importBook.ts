@@ -1,4 +1,4 @@
-import type { Format, ImportedBook } from './library'
+import type { Format, ImportedBook, OutlineEntry } from './library'
 import { chapterIndices, looksLikeHeading } from './chapters'
 
 const MAX_BYTES = 60 * 1024 * 1024
@@ -74,7 +74,11 @@ async function archiveText(file: File, format: 'DOCX' | 'EPUB', headings: Set<st
 
 function splitPassages(text: string) {
   const blocks = text.replace(/\r\n?/g, '\n').replace(/\0/g, '').split(/\n\s*\n/g)
-    .flatMap(block => block.replace(/^.+$/gm, line => looksLikeHeading(line.trim()) ? '\n' + line.trim() + '\n' : line).split(/\n\s*\n/g))
+    .flatMap(block => {
+      // Keep printed contents lines together for the reader’s linked contents view.
+      if ((block.match(/(?:^|\n)(?:chapter|part|book)\s+\d+[:.\-–—]/gi)?.length || 0) >= 3) return [block]
+      return block.replace(/^.+$/gm, line => looksLikeHeading(line.trim()) ? '\n' + line.trim() + '\n' : line).split(/\n\s*\n/g)
+    })
   return blocks.flatMap(block => {
     const remaining = block.trim()
     if (!remaining) return []
@@ -90,10 +94,22 @@ export async function importBook(file: File, progress: (status: string) => void)
   if (file.size > MAX_BYTES) throw new Error('Files can be up to 60 MB.')
   const headings = new Set<string>()
   let text: string
+  let pdfPassages: string[] | undefined
+  let outline: OutlineEntry[] | undefined
   switch (format) {
-    case 'PDF':
-      text = await (await import('./pdf')).pdfText(file, progress)
+    case 'PDF': {
+      const result = await (await import('./pdf')).pdfText(file, progress)
+      text = result.pages.join(' ')
+      if (text.length > MAX_TEXT) throw new Error('This document contains too much text for one import.')
+      const starts: number[] = []
+      pdfPassages = []
+      for (const page of result.pages) {
+        starts.push(pdfPassages.length)
+        for (const passage of splitPassages(page)) pdfPassages.push(passage)
+      }
+      outline = result.outline.map(entry => ({ ...entry, index: Math.min(pdfPassages!.length - 1, starts[entry.sourcePage - 1]) }))
       break
+    }
     case 'EPUB':
     case 'DOCX':
       text = await archiveText(file, format, headings)
@@ -102,7 +118,7 @@ export async function importBook(file: File, progress: (status: string) => void)
       text = await file.text()
   }
   if (text.length > MAX_TEXT) throw new Error('This document contains too much text for one import.')
-  const passages = splitPassages(text)
+  const passages = pdfPassages || splitPassages(text)
   if (!passages.length) throw new Error(format === 'PDF'
     ? 'This PDF has no extractable text. Scanned pages need OCR before import.'
     : 'Auden could not find readable text in this document.')
@@ -111,7 +127,7 @@ export async function importBook(file: File, progress: (status: string) => void)
       id: crypto.randomUUID(),
       title: file.name.replace(/\.[^.]+$/, '').replace(/[_]+/g, ' ').trim() || 'Untitled document',
       format: format as Format, wordCount: text.trim().split(/\s+/).length,
-      passageCount: passages.length, headings: chapterIndices(passages, headings), addedAt: Date.now(), cursor: 0, bookmarks: [], notes: [],
+      passageCount: passages.length, headings: chapterIndices(passages, headings), outline, addedAt: Date.now(), cursor: 0, bookmarks: [], notes: [],
     },
     passages,
     original: format === 'PDF' ? file.slice(0, file.size, 'application/pdf') : undefined,

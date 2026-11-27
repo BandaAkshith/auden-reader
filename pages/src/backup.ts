@@ -40,15 +40,18 @@ function readBook(value: unknown, passages: unknown): Book {
       !Number.isSafeInteger(book.wordCount) || book.wordCount < 0 ||
       !Array.isArray(passages) || passages.length !== book.passageCount || !passages.length ||
       !passages.every(text => typeof text === 'string' && text.length <= 901 && text.trim()) ||
-      !position(book.cursor) ||
+      !position(book.cursor) || (book.cursorOffset !== undefined && (!Number.isInteger(book.cursorOffset) || book.cursorOffset < 0 || book.cursorOffset >= passages[book.cursor].length)) ||
       !Array.isArray(book.bookmarks) || !book.bookmarks.every(position) ||
       (book.headings !== undefined && (!Array.isArray(book.headings) || !book.headings.every(position))) ||
+      (book.outline !== undefined && (!Array.isArray(book.outline) || !book.outline.every(entry => entry &&
+        typeof entry.title === 'string' && entry.title.length <= 2048 && Number.isInteger(entry.depth) && entry.depth >= 0 &&
+        Number.isInteger(entry.sourcePage) && entry.sourcePage > 0 && (entry.index === undefined || position(entry.index))))) ||
       !Array.isArray(book.notes) || !book.notes.every(note => note && typeof note.id === 'string' &&
         typeof note.body === 'string' && note.body.length <= 4000 && position(note.cursor))) {
     throw new Error('The backup contains an invalid document or annotation.')
   }
-  const { id, title, format, wordCount, passageCount, addedAt, openedAt, cursor, bookmarks, notes, headings } = book
-  return { id, title, format, wordCount, passageCount, addedAt, openedAt, cursor, bookmarks, notes, headings }
+  const { id, title, format, wordCount, passageCount, addedAt, openedAt, cursor, cursorOffset, bookmarks, notes, headings, outline } = book
+  return { id, title, format, wordCount, passageCount, addedAt, openedAt, cursor, cursorOffset, bookmarks, notes, headings, outline }
 }
 
 export async function restoreBackup(file: File) {
