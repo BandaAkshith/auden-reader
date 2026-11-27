@@ -1,3 +1,4 @@
+import { looksLikeHeading } from './chapters'
 import { getDocument, GlobalWorkerOptions } from 'pdfjs-dist/legacy/build/pdf.mjs'
 import workerUrl from 'pdfjs-dist/legacy/build/pdf.worker.min.mjs?url'
 
@@ -21,7 +22,11 @@ export async function pdfText(file: Blob, progress: (status: string) => void) {
       const page = await pdf.getPage(index)
       const { items } = await page.getTextContent()
       const text = items.map(item => 'str' in item ? item.str + (item.hasEOL ? '\n' : ' ') : '').join('')
-      paragraphs.push(text.replace(/(\p{L})-\n(?=\p{Ll})/gu, '$1').replace(/\n/g, ' '))
+      const lines = text.replace(/(\p{L})-\n(?=\p{Ll})/gu, '$1').split('\n')
+      const heading = lines[0]?.trim()
+      const startsChapter = Boolean(heading && looksLikeHeading(heading))
+      if (startsChapter) paragraphs.push(heading)
+      paragraphs.push(lines.slice(startsChapter ? 1 : 0).join(' '))
       page.cleanup()
       if (index % 10 === 0 || index === pdf.numPages) progress(`Reading PDF page ${index} of ${pdf.numPages}…`)
     }

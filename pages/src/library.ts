@@ -10,6 +10,7 @@ export type Book = {
   openedAt?: number
   cursor: number
   bookmarks: number[]
+  headings?: number[]
   notes: { id: string; cursor: number; body: string }[]
 }
 
@@ -65,14 +66,31 @@ export async function readOriginal(id: string): Promise<Blob | undefined> {
   return result(db.transaction('originals').objectStore('originals').get(id))
 }
 
-export async function storeBook({ book, passages, original }: ImportedBook) {
+export async function storeBooks(entries: ImportedBook[], skipExisting = false) {
   const db = await openLibrary()
   const transaction = db.transaction(['books', 'texts', 'originals'], 'readwrite')
   const done = committed(transaction)
-  transaction.objectStore('books').add(book)
-  transaction.objectStore('texts').add(passages, book.id)
-  if (original) transaction.objectStore('originals').add(original, book.id)
-  return done
+  const books = transaction.objectStore('books')
+  const added: Book[] = []
+
+  for (const { book, passages, original } of entries) {
+    const insert = () => {
+      books.add(book)
+      transaction.objectStore('texts').add(passages, book.id)
+      if (original) transaction.objectStore('originals').add(original, book.id)
+      added.push(book)
+    }
+    if (skipExisting) {
+      const existing = books.getKey(book.id)
+      existing.onsuccess = () => { if (existing.result === undefined) insert() }
+    } else insert()
+  }
+  await done
+  return added
+}
+
+export function storeBook(entry: ImportedBook) {
+  return storeBooks([entry])
 }
 
 export async function updateBook(id: string, patch: Partial<Pick<Book, 'cursor' | 'openedAt' | 'bookmarks' | 'notes'>>) {

@@ -1,4 +1,5 @@
 import type { Format, ImportedBook } from './library'
+import { chapterIndices, looksLikeHeading } from './chapters'
 
 const MAX_BYTES = 60 * 1024 * 1024
 const MAX_TEXT = 12_000_000
@@ -18,7 +19,7 @@ function epubPath(base: string, target: string) {
   return result.origin === origin ? decodeURIComponent(result.pathname.slice(1)) : ''
 }
 
-async function archiveText(file: File, format: 'DOCX' | 'EPUB') {
+async function archiveText(file: File, format: 'DOCX' | 'EPUB', headings: Set<string>) {
   const { unzip, strFromU8 } = await import('fflate')
   const bytes = new Uint8Array(await file.arrayBuffer())
   let size = 0
@@ -38,7 +39,13 @@ async function archiveText(file: File, format: 'DOCX' | 'EPUB') {
   const read = (path: string) => entries[path] instanceof Uint8Array ? strFromU8(entries[path]) : ''
   if (format === 'DOCX') {
     return elements(xml(read('word/document.xml')), 'p')
-      .map(paragraph => elements(paragraph, 't').map(run => run.textContent || '').join(''))
+      .map(paragraph => {
+        const text = elements(paragraph, 't').map(run => run.textContent || '').join('')
+        const style = elements(paragraph, 'pStyle')[0]
+        const name = Array.from(style?.attributes || []).find(attribute => attribute.localName === 'val')?.value || ''
+        if (/^heading/i.test(name)) headings.add(text.trim())
+        return text
+      })
       .join('\n\n')
   }
   const packagePath = elements(xml(read('META-INF/container.xml')), 'rootfile')[0]?.getAttribute('full-path')
@@ -57,12 +64,17 @@ async function archiveText(file: File, format: 'DOCX' | 'EPUB') {
     if (!body) return ''
     const blocks = Array.from(body.querySelectorAll('h1, h2, h3, h4, p, li, blockquote, pre'))
       .filter(block => !block.querySelector('p, li, blockquote, pre'))
-    return (blocks.length ? blocks.map(block => block.textContent || '').join('\n\n') : body.textContent || '')
+    return blocks.length ? blocks.map(block => {
+      const text = (block.textContent || '').trim()
+      if (/^h[1-4]$/i.test(block.localName)) headings.add(text)
+      return text
+    }).join('\n\n') : body.textContent || ''
   }).join('\n\n')
 }
 
 function splitPassages(text: string) {
   const blocks = text.replace(/\r\n?/g, '\n').replace(/\0/g, '').split(/\n\s*\n/g)
+    .flatMap(block => block.replace(/^.+$/gm, line => looksLikeHeading(line.trim()) ? '\n' + line.trim() + '\n' : line).split(/\n\s*\n/g))
   return blocks.flatMap(block => {
     const remaining = block.trim()
     if (!remaining) return []
@@ -76,6 +88,7 @@ export async function importBook(file: File, progress: (status: string) => void)
   const format = file.name.split('.').pop()?.toUpperCase() || ''
   if (!ALLOWED.has(format)) throw new Error('Choose a PDF, EPUB, DOCX, or TXT file.')
   if (file.size > MAX_BYTES) throw new Error('Files can be up to 60 MB.')
+  const headings = new Set<string>()
   let text: string
   switch (format) {
     case 'PDF':
@@ -83,7 +96,7 @@ export async function importBook(file: File, progress: (status: string) => void)
       break
     case 'EPUB':
     case 'DOCX':
-      text = await archiveText(file, format)
+      text = await archiveText(file, format, headings)
       break
     default:
       text = await file.text()
@@ -98,7 +111,7 @@ export async function importBook(file: File, progress: (status: string) => void)
       id: crypto.randomUUID(),
       title: file.name.replace(/\.[^.]+$/, '').replace(/[_]+/g, ' ').trim() || 'Untitled document',
       format: format as Format, wordCount: text.trim().split(/\s+/).length,
-      passageCount: passages.length, addedAt: Date.now(), cursor: 0, bookmarks: [], notes: [],
+      passageCount: passages.length, headings: chapterIndices(passages, headings), addedAt: Date.now(), cursor: 0, bookmarks: [], notes: [],
     },
     passages,
     original: format === 'PDF' ? file.slice(0, file.size, 'application/pdf') : undefined,
