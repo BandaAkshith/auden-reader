@@ -7,7 +7,7 @@ import ts from 'typescript'
 
 const temporary = await mkdtemp(join(tmpdir(), 'auden-reader-'))
 try {
-  for (const name of ['chapters', 'readingLayout', 'playbackClips', 'voiceCatalog', 'qwen']) {
+  for (const name of ['chapters', 'readingLayout', 'playbackClips', 'voiceCatalog', 'qwen', 'narrationAudio']) {
     const source = await readFile(new URL(`../src/${name}.ts`, import.meta.url), 'utf8')
     const { outputText } = ts.transpileModule(source, {
       compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
@@ -111,6 +111,25 @@ try {
   signal.fill(.5, 350, 450)
   assert.equal(trimAudioPadding(signal, 1000).length, 235)
   assert.equal(trimAudioPadding(new Float32Array(100), 1000).length, 100)
+  const { stretchSpeech, balanceSpeech } = await import(pathToFileURL(join(temporary, 'narrationAudio.mjs')))
+  const sampleRate = 24_000
+  const pitch = 145
+  const tone = Float32Array.from({ length: sampleRate }, (_, i) => .1 * Math.sin(i * 2 * Math.PI * pitch / sampleRate))
+  assert.equal(stretchSpeech(tone, sampleRate, 1), tone)
+  for (const speed of [.75, 1.15, 1.5, 2]) {
+    const stretched = stretchSpeech(tone, sampleRate, speed)
+    assert.equal(stretched.length, Math.round(sampleRate / speed))
+    let cycles = 0
+    for (let i = 1; i < stretched.length; i++) if (stretched[i - 1] <= 0 && stretched[i] > 0) cycles++
+    assert(Math.abs(cycles * sampleRate / stretched.length - pitch) < 5)
+    assert(stretched.every(Number.isFinite))
+  }
+  const quiet = new Float32Array(480).fill(.095)
+  balanceSpeech(quiet, .115)
+  assert(Math.abs(quiet[0] - .115) < .001)
+  const sharp = Float32Array.of(.99, .08, .09)
+  balanceSpeech(sharp, .115)
+  assert(sharp[0] <= .9801)
   console.log('Reader regression checks passed.')
 } finally {
   await rm(temporary, { recursive: true, force: true })

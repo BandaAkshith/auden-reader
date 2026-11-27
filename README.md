@@ -41,6 +41,8 @@ Kokoro and Qwen prepare the first six sentences before starting playback. They b
 
 Choose **Deep Voice**, **Bass Voice**, or **Manly Voice** in Audio settings. A voice change leaves the currently playing and buffered audio intact and applies to newly generated batches. **Prepare Kokoro** loads its model before playback.
 
+Changing the playback speed adjusts the audio already playing and the decoded batches, so the player keeps its buffer. Kokoro and Qwen use pitch-preserving time stretching. Qwen also keeps its narrator instructions consistent across batches and gently balances levels between rendered pieces.
+
 Narration adjusts delivery for explicit dialogue cues such as “she whispered” or “he shouted.” It also recognizes “chu chu” near train references and “tuk tuk” near door knocks. The original text stays visible in the reader.
 
 ## Qwen3-TTS on Apple Silicon

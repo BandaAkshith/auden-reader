@@ -50,11 +50,11 @@ export function qwenDirection(text: string) {
   return deliveryFor(text)
 }
 
-export async function renderQwen(text: string, voice: QwenVoice, speed: number, signal: AbortSignal, direction = qwenDirection(text)) {
+export async function renderQwen(text: string, voice: QwenVoice, signal: AbortSignal, direction = qwenDirection(text)) {
   const response = await bridge('/narrate', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text, voice, direction, speed }),
+    body: JSON.stringify({ text, voice, direction, speed: 1 }),
     signal: AbortSignal.any([signal, AbortSignal.timeout(120_000)]),
   })
   return response.arrayBuffer()

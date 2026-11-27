@@ -1,6 +1,7 @@
 """Loopback-only Qwen3 narration companion for Auden."""
 import io
 import json
+import math
 import os
 import traceback
 from concurrent.futures import ThreadPoolExecutor
@@ -26,10 +27,10 @@ VOICE_PROFILES = {
     'Manly Voice': ('Aiden', 'Use a mature male voice with a strong, confident delivery and clear articulation.'),
 }
 DIRECTIONS = {
-    'plain': 'Read naturally as an audiobook narrator, with clear diction and emotionally appropriate phrasing.',
-    'quiet': 'Use a hushed, intimate delivery for the quoted dialogue, then read the narration naturally.',
-    'emphatic': 'Deliver the quoted dialogue with controlled anger and a sharp emphasis, then return to normal narration.',
-    'sad': 'Deliver the quoted dialogue with restrained sorrow and a gentle pace, then return to normal narration.',
+    'plain': '',
+    'quiet': 'Use an intimate, hushed delivery for the quoted words.',
+    'emphatic': 'Emphasize the quoted words with controlled anger.',
+    'sad': 'Read the quoted words with restrained sorrow.',
     'train': 'Voice the opening choo-choo as a playful imitation of a steam train, then read the narration naturally.',
     'knock': 'Voice the opening sound as two short, distinct taps imitating a knock on a wooden door.',
 }
@@ -54,25 +55,32 @@ def narrate(model, text, voice, direction, speed):
     import numpy as np
 
     speaker, profile = VOICE_PROFILES.get(voice, (voice, ''))
-    instruction = f'{profile} {DIRECTIONS[direction]}'.strip()
+    baseline = 'Narrate naturally with a steady accent, register and volume.'
+    instruction = ' '.join(part for part in (profile, baseline, DIRECTIONS[direction]) if part)
     if speed < 0.95:
         instruction += ' Read at a relaxed pace.'
     elif speed > 1.05:
         instruction += ' Read at a brisk pace while staying clear.'
-    pcm = io.BytesIO()
-    with wave.open(pcm, 'wb') as output:
-        output.setnchannels(1)
-        output.setsampwidth(2)
-        output.setframerate(model.sample_rate)
-        for result in model.generate_custom_voice(
-            text=text, speaker=speaker, language='english', instruct=instruction,
-            max_tokens=600, temperature=0.55,
-        ):
-            samples = np.asarray(result.audio, dtype=np.float32).reshape(-1)
-            output.writeframes((np.clip(samples, -1, 1) * 32767).astype('<i2').tobytes())
-        if output.getnframes() == 0:
-            raise RuntimeError('Qwen returned empty audio.')
-    return pcm.getvalue()
+    estimated_words = max(len(text.split()), len(text) / 6)
+    token_limit = min(600, math.ceil(12.5 * (7 + estimated_words / 1.55)))
+    for temperature in (0.55, 0.7):
+        pcm = io.BytesIO()
+        tokens = 0
+        with wave.open(pcm, 'wb') as output:
+            output.setnchannels(1)
+            output.setsampwidth(2)
+            output.setframerate(model.sample_rate)
+            for result in model.generate_custom_voice(
+                text=text, speaker=speaker, language='english', instruct=instruction,
+                max_tokens=token_limit, temperature=temperature,
+            ):
+                tokens += result.token_count
+                samples = np.asarray(result.audio, dtype=np.float32).reshape(-1)
+                output.writeframes((np.clip(samples, -1, 1) * 32767).astype('<i2').tobytes())
+            complete = output.getnframes() > 0 and 0 < tokens < token_limit
+        if complete:
+            return pcm.getvalue()
+    raise RuntimeError('Qwen did not complete this narration clip within its length budget.')
 
 
 class Handler(SimpleHTTPRequestHandler):
@@ -151,7 +159,7 @@ class Handler(SimpleHTTPRequestHandler):
             text, voice, direction, speed = (payload[key] for key in ('text', 'voice', 'direction', 'speed'))
             if (not isinstance(text, str) or not 0 < len(text.strip()) <= 420
                     or not isinstance(voice, str) or (voice not in VOICES and voice not in VOICE_PROFILES)
-                    or direction not in DIRECTIONS
+                    or not isinstance(direction, str) or direction not in DIRECTIONS
                     or type(speed) not in (int, float) or not 0.75 <= speed <= 2):
                 raise ValueError()
         except (TypeError, ValueError, KeyError, UnicodeError):
