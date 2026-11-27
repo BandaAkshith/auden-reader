@@ -22,7 +22,7 @@ jobs:
           node-version: '24'
           cache: npm
           cache-dependency-path: pages/package-lock.json
-      - run: npm ci --prefix pages
+      - run: npm ci --prefix pages --onnxruntime-node-install-cuda=skip
       - run: npm run build --prefix pages
       - uses: actions/upload-pages-artifact@v4
         with:
