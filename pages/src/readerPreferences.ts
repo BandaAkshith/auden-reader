@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
+import { profileKey } from './accounts'
 
 export function usePreference<T extends string | number | boolean>(key: string, fallback: T, allowed?: readonly T[]) {
-  const storageKey = 'auden-pages:' + key
+  const storageKey = profileKey(key)
   const [value, setValue] = useState<T>(() => {
     try {
       const stored = localStorage.getItem(storageKey)

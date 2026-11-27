@@ -1,5 +1,5 @@
 import { type CSSProperties, lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowDownToLine, ArrowLeft, ArrowRight, BookOpen, Bookmark, Check, List, Maximize2, Minimize2, Pencil, ChevronLeft, ChevronRight, FileText, Headphones, LibraryBig, LockKeyhole, Pause, Play, Plus, Search, Square, StickyNote, Timer, Trash2, Upload, X, Moon, Sun, RotateCcw, SkipForward } from 'lucide-react'
+import { ArrowDownToLine, ArrowLeft, ArrowRight, BookOpen, Bookmark, Check, List, Maximize2, Minimize2, Pencil, ChevronLeft, ChevronRight, FileText, Headphones, LibraryBig, LockKeyhole, Pause, Play, Plus, Search, Square, StickyNote, Timer, Trash2, Upload, X, Moon, Sun, RotateCcw, SkipForward, Settings2, UserRound } from 'lucide-react'
 import { importBook } from './importBook'
 import { listBooks, readOriginal, readPassages, removeBook, storeBook, updateBook, type Book, type OutlineEntry } from './library'
 import { sample } from './sample'
@@ -7,6 +7,9 @@ import { useNarration, type Position } from './useNarration'
 import { bookStructure, paginate, splitSentences, type PageFragment } from './readingLayout'
 import { naturalVoices, type NaturalVoice } from './voiceCatalog'
 import { usePreference } from './readerPreferences'
+import { AccountPage } from './AccountPage'
+import { PreferencesPage, layouts, papers, typefaces, readingRates } from './PreferencesPage'
+import { profile, openLibraryAfterAccountChange, signOut } from './accounts'
 import { dayKey, loadInsights, summarizeInsights, useReadingSession } from './insights'
 
 const OriginalPdf = lazy(() => import('./OriginalPdf'))
@@ -41,6 +44,16 @@ function csvCell(value: string | number) {
 }
 
 export function App() {
+  const [view, setView] = useState(window.location.hash)
+  useEffect(() => {
+    const change = () => { setView(window.location.hash); window.scrollTo(0, 0) }
+    window.addEventListener('hashchange', change)
+    return () => window.removeEventListener('hashchange', change)
+  }, [])
+  const accountView = view === '#login' || view === '#signup'
+  const showingPreferences = view === '#preferences'
+  const isUtilityView = accountView || showingPreferences
+  function logout() { signOut(); openLibraryAfterAccountChange() }
   const [dark, setDark] = usePreference<boolean>('dark-mode', false)
   useEffect(() => { document.documentElement.dataset.theme = dark ? 'dark' : 'light' }, [dark])
   const [books, setBooks] = useState<Book[]>([])
@@ -65,7 +78,7 @@ export function App() {
     return () => { current = false }
   }, [])
 
-  const selected = books.find(book => book.id === active?.id)
+  const selected = !isUtilityView ? books.find(book => book.id === active?.id) : undefined
   const recent = books.filter(book => book.openedAt)
     .sort((a, b) => (b.openedAt || 0) - (a.openedAt || 0))[0]
   const filtered = books.filter(book => `${book.title} ${book.format}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()))
@@ -190,10 +203,13 @@ export function App() {
 
   return <div className="shell">
     <header className="masthead">
-      <button className="brand" onClick={() => { setActive(undefined); setError('') }}><span className="brand-mark"><BookOpen size={21} strokeWidth={1.6} /></span>Auden</button>
+      <button className="brand" onClick={() => { setActive(undefined); setError(''); window.location.hash = '' }}><span className="brand-mark"><BookOpen size={21} strokeWidth={1.6} /></span>Auden</button>
       <div className="masthead-end"><span><LockKeyhole size={14} /> Device library</span>
         <button className="icon-button theme-button" aria-label={dark ? 'Switch to light mode' : 'Switch to dark mode'} title={dark ? 'Light mode' : 'Dark mode'} onClick={() => setDark(!dark)}>{dark ? <Sun size={19} /> : <Moon size={19} />}</button>
-        <button className="primary compact" disabled={busy || !loaded} onClick={() => input.current?.click()}><Plus size={17} /> Import<span className="wide-only"> documents</span></button></div>
+        <a className="icon-button theme-button" aria-label="Preferences" title="Preferences" href="#preferences"><Settings2 size={18} /></a>
+        {profile ? <a className="icon-button theme-button" href="#preferences" aria-label={`Account for ${profile.name}`} title={profile.name}><UserRound size={18} /></a>
+          : <a className="secondary compact account-link" href="#login" aria-label="Log in"><UserRound size={16} /> <span>Log in</span></a>}
+        {!isUtilityView && <button className="primary compact" disabled={busy || !loaded} onClick={() => input.current?.click()}><Plus size={17} /> Import<span className="wide-only"> documents</span></button>}</div>
       <input ref={input} type="file" aria-label="Import documents" accept=".pdf,.epub,.docx,.txt" multiple hidden onChange={event => {
         const files = Array.from(event.currentTarget.files || [])
         event.currentTarget.value = ''
@@ -201,9 +217,9 @@ export function App() {
       }} />
     </header>
     <main className="workspace">
-      {error && <div className="notice error" role="alert">{error}<button className="icon-button" aria-label="Dismiss error" onClick={() => setError('')}><X size={17} /></button></div>}
-      {status && (!selected || busy) && <div className="notice" role="status"><span>{status}</span>{!busy && <button className="icon-button" aria-label="Dismiss status" onClick={() => setStatus('')}><X size={17} /></button>}</div>}
-      {selected && active ? <Reader key={selected.id} book={selected} passages={active.passages} dark={dark} toggleTheme={() => setDark(!dark)} save={changes => patch(selected.id, changes)} onBack={() => { setActive(undefined); setStatus(''); window.scrollTo(0, 0) }} />
+      {error && !isUtilityView && <div className="notice error" role="alert">{error}<button className="icon-button" aria-label="Dismiss error" onClick={() => setError('')}><X size={17} /></button></div>}
+      {status && !isUtilityView && (!selected || busy) && <div className="notice" role="status"><span>{status}</span>{!busy && <button className="icon-button" aria-label="Dismiss status" onClick={() => setStatus('')}><X size={17} /></button>}</div>}
+      {accountView ? <AccountPage key={view} signup={view === '#signup'} /> : showingPreferences ? <PreferencesPage dark={dark} setDark={setDark} logout={logout} /> : selected && active ? <Reader key={selected.id} book={selected} passages={active.passages} dark={dark} toggleTheme={() => setDark(!dark)} save={changes => patch(selected.id, changes)} onBack={() => { setActive(undefined); setStatus(''); window.scrollTo(0, 0) }} />
         : <>
           <section className="hero" aria-labelledby="welcome">
             <div className="hero-copy"><span className="kicker"><span /> Your reading room</span>
@@ -301,10 +317,6 @@ function ReadingInsights({ books }: { books: Book[] }) {
     </ul>
   </section>
 }
-
-const layouts = ['single', 'spread', 'scroll'] as const
-const papers = ['match', 'parchment', 'white', 'night', 'contrast'] as const
-const typefaces = ['literary', 'classic', 'system', 'clean'] as const
 
 function Reader({ book, passages, dark, toggleTheme, save, onBack }: {
   book: Book; passages: string[]; dark: boolean; toggleTheme: () => void; save: (changes: Parameters<typeof updateBook>[1]) => Promise<boolean>; onBack: () => void
@@ -719,7 +731,7 @@ function Reader({ book, passages, dark, toggleTheme, save, onBack }: {
             ? <label>Voice <select value={narration.naturalVoice} onChange={event => { narration.stop(); narration.setNaturalVoice(event.target.value as NaturalVoice) }}>{Object.entries(naturalVoices).map(([id, title]) => <option key={id} value={id}>{title}</option>)}</select></label>
             : <label>Voice <select value={narration.voiceKey} onChange={event => { narration.stop(); narration.setVoiceKey(event.target.value) }}><option value="">Device default</option>{narration.voices.map(voice => <option key={voice.voiceURI} value={voice.voiceURI}>{voice.name}</option>)}</select></label>}
           <button className="secondary compact" disabled={!narration.supported || narration.state === 'loading'} onClick={() => narration.play(position, true)}>Preview voice</button>
-          <label>Speed <select value={narration.rate} onChange={event => narration.setRate(Number(event.target.value))}>{[.75,.8,1,1.15,1.2,1.3,1.5,1.75,2].map(value => <option key={value} value={value}>{value}×</option>)}</select></label>
+          <label>Speed <select value={narration.rate} onChange={event => narration.setRate(Number(event.target.value))}>{readingRates.map(value => <option key={value} value={value}>{value}×</option>)}</select></label>
           <label><Timer size={15} /> Sleep timer <select value={narration.minutes} onChange={event => narration.setSleepTimer(Number(event.target.value))}><option value={0}>Off</option><option value={-1}>End of chapter</option><option value={15}>15 min</option><option value={30}>30 min</option><option value={60}>60 min</option></select></label>
           <label><input type="checkbox" checked={follow} onChange={event => setFollow(event.target.checked)} /> Follow narration</label>
           {nextChapter !== undefined && <button className="secondary compact" onClick={() => narration.play({ index: nextChapter, offset: 0 })}><SkipForward size={15} /> Listen from next chapter</button>}
@@ -728,6 +740,7 @@ function Reader({ book, passages, dark, toggleTheme, save, onBack }: {
           ? 'Automatic starts with a device voice when needed and switches to Kokoro when a clip is ready.'
           : 'Kokoro prepares audio on this device. Its first use needs a model download.'}</p>}
       </>}
+      {narration.buffered > 0 && <div className="reader-message"><Check size={14}/> {narration.buffered} {narration.buffered === 1 ? 'sentence' : 'sentences'} ready ahead</div>}
       {(message || !narration.supported) && <div className="reader-message" role="status"><Check size={14}/>{message || 'Narration is unavailable in this browser.'}</div>}
     </div>
   </section>

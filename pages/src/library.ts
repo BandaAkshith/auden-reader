@@ -1,3 +1,5 @@
+import { profile } from './accounts'
+
 export type Format = 'PDF' | 'EPUB' | 'DOCX' | 'TXT'
 
 export type OutlineEntry = { title: string; sourcePage: number; depth: number; index?: number }
@@ -24,7 +26,7 @@ let database: Promise<IDBDatabase> | undefined
 
 function openLibrary() {
   database ??= new Promise<IDBDatabase>((resolve, reject) => {
-    const request = indexedDB.open('auden-pages-library', 1)
+    const request = indexedDB.open(profile ? `auden-pages-library:${profile.id}` : 'auden-pages-library', 1)
     request.onupgradeneeded = () => {
       const db = request.result
       db.createObjectStore('books', { keyPath: 'id' })

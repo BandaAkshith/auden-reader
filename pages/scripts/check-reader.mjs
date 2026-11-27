@@ -16,7 +16,7 @@ try {
   }
 
   const { paginate, bookStructure } = await import(pathToFileURL(join(temporary, 'readingLayout.mjs')))
-  const { makeClip, nextReadable } = await import(pathToFileURL(join(temporary, 'playbackClips.mjs')))
+  const { makeClip, nextReadable, naturalClip, positionInClip } = await import(pathToFileURL(join(temporary, 'playbackClips.mjs')))
   const passages = ['Chapter 1: Arrival', 'Part I: The Harbor', 'A long line with words in it. '.repeat(90),
     'Chapter 2: Departure', 'Part II: The Coast', 'Then the ship left. '.repeat(80), 'Afterword', 'Appendix']
   const structure = bookStructure(passages)
@@ -57,6 +57,15 @@ try {
   }
   assert.equal(transcript.trim(), (segments[1] + segments[2]).trim())
   assert(clips > 2)
+  const short = ['Rain fell.', 'The lamp glowed.', 'A bell rang.', 'The ferry arrived.', 'Mira went home.', 'The fire was warm.']
+  const group = naturalClip(short, { index: 0, offset: 0 }, () => false)
+  assert.equal(group.sentences, 5)
+  assert.equal(naturalClip(short, { index: 0, offset: 0 }, () => false, undefined, 1).sentences, 1)
+  assert.deepEqual(group.next, { index: 5, offset: 0 })
+  assert.equal(positionInClip(group, group.parts[3].at + 4).part.point.index, 3)
+  assert.equal(positionInClip(group, group.parts[3].at + 4).offset, 4)
+  assert.equal(naturalClip(short, { index: 0, offset: 0 }, () => false, 2).sentences, 2)
+  assert.equal(naturalClip(short, { index: 0, offset: 0 }, index => index === 2).parts[2].point.index, 3)
   console.log('Reader regression checks passed.')
 } finally {
   await rm(temporary, { recursive: true, force: true })

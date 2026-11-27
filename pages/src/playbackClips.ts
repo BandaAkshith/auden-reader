@@ -30,3 +30,40 @@ export function makeClip(passages: string[], point: Position): Clip | undefined 
     : { index: point.index + 1, offset: 0 }
   return { point, end, next, text: remaining.slice(0, length) }
 }
+
+export type NaturalClip = Clip & { parts: (Clip & { at: number })[]; sentences: number }
+
+export function naturalClip(passages: string[], start: Position, shouldSkip: (index: number) => boolean, stopAt?: number, maximumSentences = 5): NaturalClip | undefined {
+  const parts: NaturalClip['parts'] = []
+  let point = nextReadable(passages, start, shouldSkip)
+  let text = ''
+  let sentences = 0
+  while (sentences < maximumSentences && point.index < passages.length && (stopAt === undefined || point.index < stopAt)) {
+    const remaining = passages[point.index].slice(point.offset)
+    const sentence = splitSentences(remaining)[0]?.text
+    if (!sentence) break
+    const capacity = 350 - text.length - Number(Boolean(text))
+    if (parts.length && sentence.length > capacity) break
+    let length = Math.min(sentence.length, capacity)
+    if (length < sentence.length) {
+      const boundary = sentence.slice(0, length).search(/\s+\S*$/)
+      if (boundary > 150) length = boundary + 1
+    }
+    const spoken = remaining.slice(0, length)
+    const end = point.offset + length
+    const next = nextReadable(passages, { index: point.index, offset: end }, shouldSkip)
+    if (text) text += ' '
+    parts.push({ point, end, next, text: spoken, at: text.length })
+    text += spoken
+    sentences++
+    point = next
+  }
+  if (!parts.length) return
+  return { point: parts[0].point, end: parts[0].end, next: point, text, parts, sentences }
+}
+
+export function positionInClip(clip: Clip | NaturalClip, offset: number) {
+  const part = 'parts' in clip ? [...clip.parts].reverse().find(item => item.at <= offset) || clip.parts[0] : null
+  const source = part || clip
+  return { part: source, offset: Math.min(source.end - 1, source.point.offset + offset - (part?.at || 0)) }
+}

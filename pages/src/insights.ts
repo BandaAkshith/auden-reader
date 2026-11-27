@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { profileKey } from './accounts'
 
 type Day = { seconds: number; sessions: number }
 export type Insights = Record<string, Record<string, Day>>
@@ -8,7 +9,7 @@ export function dayKey(date = new Date()) {
     .map(part => String(part).padStart(2, '0')).join('-')
 }
 
-const key = 'auden-pages:reading-insights'
+const key = profileKey('reading-insights')
 export function loadInsights(): Insights {
   try { return JSON.parse(localStorage.getItem(key) || '{}') || {} }
   catch { return {} }

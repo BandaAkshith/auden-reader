@@ -433,3 +433,29 @@ progress::-webkit-progress-value { background: #557760 }
 :root[data-theme="dark"] .reader .reading-progress progress { accent-color: #bc9f76; }
 :root[data-theme="dark"] .reader .player { background: #25211c; border-color: #564638; }
 .reader .player.player-settings-open { position: relative; bottom: auto; }
+
+.masthead-end a, .account-form .back, .preferences-page .back { text-decoration: none; }
+.masthead-end a.icon-button { line-height: 1; }
+.account-page { margin: 28px auto 44px; max-width: 840px; display: grid; grid-template-columns: .95fr 1fr; border: 1px solid var(--line); border-radius: 16px; overflow: hidden; background: var(--white); }
+.account-intro { padding: clamp(24px, 5vw, 51px); background: var(--highlight, #e8e8dc); }
+.account-intro h1, .preferences-page h1 { font-size: clamp(2.6rem, 5vw, 4.1rem); line-height: 1; margin: 12px 0; }
+.account-intro p, .preferences-page > p { color: var(--muted); line-height: 1.55; }
+.account-form { display: grid; gap: 12px; padding: clamp(20px, 5vw, 42px); }
+.account-form label, .preferences-grid label { display: grid; gap: 5px; color: var(--muted); font-size: .86rem; }
+.account-form input { border: 1px solid var(--line); background: var(--white); color: var(--ink); border-radius: 8px; min-height: 41px; padding: 6px 9px; width: 100%; }
+.account-form small, .preferences-card small { color: var(--muted); line-height: 1.5; }
+.account-form p { font-size: .86rem; }
+.account-form a, .preferences-card a { color: var(--green); }
+.preferences-page { max-width: 850px; margin: 12px auto 36px; }
+.preferences-card { background: var(--white); border: 1px solid var(--line); border-radius: 13px; margin-top: 15px; padding: clamp(14px, 3vw, 23px); }
+.preferences-card h2 { display: flex; align-items: center; gap: 9px; font-size: 1.55rem; margin-bottom: 12px; }
+.preferences-card small { display: block; margin-top: 9px; }
+.preferences-card button { margin: 9px 0 0; }
+.preferences-grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(140px, 1fr)); gap: 12px; }
+.preferences-grid .settings-check { display: flex; align-items: center; gap: 7px; }
+@media (max-width: 540px) {
+  .account-page { grid-template-columns: 1fr; margin-top: 15px; }
+  .masthead-end { gap: 4px; }
+  .masthead-end .account-link { padding-inline: 7px; }
+  .masthead-end .account-link span { display: none; }
+}
