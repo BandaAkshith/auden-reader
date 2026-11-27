@@ -7,7 +7,7 @@ import ts from 'typescript'
 
 const temporary = await mkdtemp(join(tmpdir(), 'auden-reader-'))
 try {
-  for (const name of ['chapters', 'readingLayout', 'playbackClips', 'voiceCatalog', 'qwen', 'narrationAudio']) {
+  for (const name of ['chapters', 'readingLayout', 'playbackClips', 'voiceCatalog', 'qwen', 'narrationAudio', 'wordTiming', 'wordAlignment']) {
     const source = await readFile(new URL(`../src/${name}.ts`, import.meta.url), 'utf8')
     const { outputText } = ts.transpileModule(source, {
       compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
@@ -130,6 +130,25 @@ try {
   const sharp = Float32Array.of(.99, .08, .09)
   balanceSpeech(sharp, .115)
   assert(sharp[0] <= .9801)
+  const { acousticWord, forcedWordSpans, wordAt, wordRanges } = await import(pathToFileURL(join(temporary, 'wordTiming.mjs')))
+  const { utteranceWords } = await import(pathToFileURL(join(temporary, 'wordAlignment.mjs')))
+  assert.deepEqual(wordRanges('“We’re ready.”').map(word => word.text), ['We’re', 'ready'])
+  assert.equal(acousticWord('42'), 'FORTY|TWO')
+  const signalLabels = [0, 1, 0, 1, 0, 2, 0, 3, 0]
+  const emissions = Float32Array.from({ length: signalLabels.length * 4 }, (_, i) => signalLabels[i >> 2] === i % 4 ? 8 : -8)
+  const spans = forcedWordSpans(emissions, signalLabels.length, 4, [1, 1, 2, 3], [0, 0, -1, 1], 2, 0, .18)
+  assert(spans[0].start > .02 && spans[0].end < .09)
+  assert(spans[1].start > .14 && spans[1].end < .17)
+  const words = spans.map((span, index) => ({ ...span, part: 0, from: index * 3, to: index * 3 + 2 }))
+  assert.equal(wordAt(words, .04), words[0])
+  assert.equal(wordAt(words, .11), undefined)
+  assert.equal(wordAt(words, .15), words[1])
+  const originals = ['Chu chu! The train left.', 'The lamp glowed.']
+  const spoken = [spokenText(originals[0], originals[0]), originals[1]]
+  const audioUtterances = batchUtterances(spoken, 220, deliveryFor)
+  const ranges = utteranceWords(originals, spoken, audioUtterances[0].ranges)
+  assert.deepEqual(ranges.map(word => [word.text, originals[word.part].slice(word.from, word.to)]).slice(0, 4),
+    [['Choo', 'Chu'], ['choo', 'chu'], ['The', 'The'], ['train', 'train']])
   console.log('Reader regression checks passed.')
 } finally {
   await rm(temporary, { recursive: true, force: true })

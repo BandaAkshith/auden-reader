@@ -59,14 +59,16 @@ export function narrationBatch(passages: string[], start: Position, shouldSkip: 
 // Model input can be smaller than a batch. Stitch the rendered pieces before
 // counting the batch as ready so long sentences never change its boundaries.
 export function batchUtterances<Direction extends string>(sentences: string[], maximumCharacters: number, deliveryOf: (text: string) => Direction) {
-  const utterances: { text: string; direction: Direction }[] = []
-  for (const sentence of sentences) {
+  const utterances: { text: string; direction: Direction; ranges: { part: number; from: number; to: number }[] }[] = []
+  for (const [part, sentence] of sentences.entries()) {
     const direction = deliveryOf(sentence)
     let remaining = sentence.trim()
+    let from = sentence.length - sentence.trimStart().length
     while (remaining) {
       const previous = utterances.at(-1)
       if (previous?.direction === direction && previous.text.length + 1 + remaining.length <= maximumCharacters) {
         previous.text += ' ' + remaining
+        previous.ranges.push({ part, from, to: from + remaining.length })
         break
       }
       let end = Math.min(remaining.length, maximumCharacters)
@@ -76,8 +78,10 @@ export function batchUtterances<Direction extends string>(sentences: string[], m
         if (boundary > end * .5) end = boundary
         else if (/[\uD800-\uDBFF]/.test(remaining[end - 1])) end--
       }
-      utterances.push({ text: remaining.slice(0, end).trimEnd(), direction })
-      remaining = remaining.slice(end).trimStart()
+      utterances.push({ text: remaining.slice(0, end).trimEnd(), direction, ranges: [{ part, from, to: from + end }] })
+      const rest = remaining.slice(end)
+      remaining = rest.trimStart()
+      from += end + rest.length - remaining.length
     }
   }
   return utterances

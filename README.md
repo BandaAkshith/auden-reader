@@ -37,7 +37,7 @@ Auden offers a guest library plus optional browser-local accounts. Use **Log in*
 
 Open **Preferences → Profile** to choose one of the twelve zodiac signs or Ophiuchus. One selection sets the built-in avatar and matching constellation banner for the browser profile.
 
-Kokoro and Qwen prepare the first six sentences before starting playback. They build eight-sentence batches after that and keep a rolling target of three fully generated, decoded batches. A book or chapter stop can shorten the final batch. Auden can render smaller pieces within a batch for long sentences and dialogue cues, and joins prepared batches on the audio clock. The reading highlight estimates the active sentence from the batch time. Synthesis can still fall behind if a device renders more slowly than playback.
+Kokoro and Qwen prepare the first six sentences before starting playback. They build eight-sentence batches after that and keep a rolling target of three fully generated, decoded batches. A book or chapter stop can shorten the final batch. Auden can render smaller pieces within a batch for long sentences and dialogue cues, and joins prepared batches on the audio clock. Auden uses a local English Wav2Vec2 alignment model to synchronize individual words with generated speech. The first use downloads the approximately 95 MB alignment model. Words without reliable timestamps remain unmarked. Device speech depends on the browser's word timing events. Synthesis can still fall behind if a device renders more slowly than playback.
 
 Choose **Deep Voice**, **Bass Voice**, or **Manly Voice** in Audio settings. A voice change leaves the currently playing and buffered audio intact and applies to newly generated batches. **Prepare Kokoro** loads its model before playback.
 

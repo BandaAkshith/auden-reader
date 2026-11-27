@@ -8,3 +8,4 @@ dist/
 .qwen-venv/
 .qwen-cache/
 __pycache__/
+pages/public/word-model/

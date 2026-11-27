@@ -559,7 +559,7 @@ function Reader({ book, passages, dark, toggleTheme, save, onBack }: {
     if (index === structure.printed) return <h2 key={key} className="chapter-opening" data-position={index}>{passage}</h2>
 
     const Element = structure.opening.has(index) ? 'h2' : 'p'
-    const boundary = interactive && index === speakingPosition.current?.index ? narration.boundary : null
+    const boundary = interactive && index === narration.boundary?.index ? narration.boundary : null
     const current = index === cursor && fragmentStart <= position.offset && position.offset < fragmentEnd
     return <Element key={key} className={Element === 'h2' ? 'chapter-opening' : 'book-paragraph'} data-position={index} aria-current={current ? 'location' : undefined}>
       {!interactive ? passage.slice(fragmentStart, fragmentEnd) : splitSentences(passage).flatMap(sentence => {

@@ -23,6 +23,15 @@ jobs:
           cache: npm
           cache-dependency-path: pages/package-lock.json
       - run: npm ci --prefix pages --onnxruntime-node-install-cuda=skip
+      - name: Fetch the pinned word alignment model
+        run: |
+          root=pages/public/word-model/onnx-community/wav2vec2-base-960h-ONNX
+          base=https://huggingface.co/onnx-community/wav2vec2-base-960h-ONNX/resolve/729c1a6730fb549c20a1c73a3d3f96f11020225e
+          mkdir -p "$root/onnx"
+          for file in config.json preprocessor_config.json tokenizer.json tokenizer_config.json onnx/model_quantized.onnx; do
+            curl --fail --silent --show-error --location --retry 3 --max-time 120 "$base/$file?download=true" -o "$root/$file"
+          done
+          printf '%s  %s\n' 1d9a366c27b2966625cd5035ac3db8847c53bba617169912bb251b42975a3a22 "$root/onnx/model_quantized.onnx" | sha256sum -c -
       - run: npm run test:reader --prefix pages
       - run: npm run build --prefix pages
       - uses: actions/upload-pages-artifact@v4
