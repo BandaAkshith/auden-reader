@@ -5,7 +5,8 @@ import { listBooks, readOriginal, readPassages, removeBook, storeBook, updateBoo
 import { sample } from './sample'
 import { useNarration, type Position } from './useNarration'
 import { bookStructure, paginate, splitSentences, type PageFragment } from './readingLayout'
-import { naturalVoices, type NaturalVoice } from './voiceCatalog'
+import { naturalVoiceChoices, type NaturalVoiceChoice } from './voiceCatalog'
+import { TARGET_READY_BUFFER_BATCHES } from './playbackClips'
 import { usePreference } from './readerPreferences'
 import { AccountPage } from './AccountPage'
 import { PreferencesPage, layouts, papers, typefaces, readingRates } from './PreferencesPage'
@@ -731,9 +732,9 @@ function Reader({ book, passages, dark, toggleTheme, save, onBack }: {
         <div className="player-options">
           <label>Engine <select value={narration.engine} onChange={event => { narration.stop(); setMessage(''); narration.setEngine(event.target.value as typeof narration.engine) }}>{voiceEngines.map(value => <option key={value} value={value}>{voiceEngineLabels[value]}</option>)}</select></label>
           {narration.engine === 'qwen'
-            ? <label>Voice <select value={narration.qwenVoice} onChange={event => { narration.stop(); narration.setQwenVoice(event.target.value as QwenVoice) }}>{qwenVoices.map(value => <option key={value}>{value}</option>)}</select></label>
+            ? <label>Voice <select value={narration.qwenVoice} onChange={event => narration.setQwenVoice(event.target.value as QwenVoice)}>{qwenVoices.map(value => <option key={value}>{value}</option>)}</select></label>
             : narration.engine !== 'device'
-            ? <label>Voice <select value={narration.naturalVoice} onChange={event => { narration.stop(); narration.setNaturalVoice(event.target.value as NaturalVoice) }}>{Object.entries(naturalVoices).map(([id, title]) => <option key={id} value={id}>{title}</option>)}</select></label>
+            ? <label>Voice <select value={narration.naturalVoice} onChange={event => narration.setNaturalVoice(event.target.value as NaturalVoiceChoice)}>{Object.entries(naturalVoiceChoices).map(([id, title]) => <option key={id} value={id}>{title}</option>)}</select></label>
             : <label>Voice <select value={narration.voiceKey} onChange={event => { narration.stop(); narration.setVoiceKey(event.target.value) }}><option value="">Device default</option>{narration.voices.map(voice => <option key={voice.voiceURI} value={voice.voiceURI}>{voice.name}</option>)}</select></label>}
           {narration.engine === 'qwen' ? <button className="secondary compact" disabled={narration.qwenPreparation || narration.state !== 'idle'}
             onClick={() => void narration.prepareQwen()}>{narration.qwenPreparation ? 'Checking Qwen…' : 'Check Qwen connection'}</button>
@@ -751,7 +752,10 @@ function Reader({ book, passages, dark, toggleTheme, save, onBack }: {
           ? 'Automatic starts with a device voice when needed and switches to Kokoro when a clip is ready.'
           : 'Kokoro queues audio ahead and joins ready clips continuously. The first use needs a model download.'}</p>}
       </>}
-      {narration.buffered > 0 && <div className="reader-message"><Check size={14}/> {narration.buffered} {narration.buffered === 1 ? 'sentence' : 'sentences'} ready ahead</div>}
+      {narration.buffered > 0 && <div className="reader-message"><Check size={14}/> {narration.buffered} of {TARGET_READY_BUFFER_BATCHES} batches ready ahead</div>}
+      {narration.speaker === 'natural' && narration.playingVoice &&
+        narration.playingVoice !== (narration.engine === 'qwen' ? narration.qwenVoice : naturalVoiceChoices[narration.naturalVoice]) &&
+        <div className="reader-message">Playing {narration.playingVoice}. The selected voice starts with newly generated batches.</div>}
       {(message || !narration.supported) && <div className="reader-message" role="status"><Check size={14}/>{message || 'Narration is unavailable in this browser.'}</div>}
     </div>
   </section>

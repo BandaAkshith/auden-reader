@@ -148,6 +148,10 @@ export function paginate(passages: string[], structure: ReturnType<typeof bookSt
 }
 
 const segmenter = typeof Intl.Segmenter === 'function' ? new Intl.Segmenter(undefined, { granularity: 'sentence' }) : null
+export function firstSentence(text: string) {
+  return segmenter ? segmenter.segment(text)[Symbol.iterator]().next().value?.segment
+    : text.match(/^.+?(?:[.!?]+(?=\s|$)\s*|$)/s)?.[0]
+}
 export function splitSentences(text: string) {
   if (segmenter) return Array.from(segmenter.segment(text), ({ segment, index }) => ({ text: segment, offset: index }))
   return Array.from(text.matchAll(/.+?(?:[.!?]+(?=\s|$)\s*|$)/gs), match => ({ text: match[0], offset: match.index }))

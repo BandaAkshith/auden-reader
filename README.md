@@ -27,7 +27,7 @@ Reading insights measure time while the reader is visible, with a weekly summary
 
 ## Audiobook player
 
-The default **Automatic** playback starts with an on-device voice when Kokoro needs time, then uses Kokoro when an upcoming clip is ready. **Kokoro only** offers 11 American and British English voices. **Device speech** uses voices installed on the device. Voice previews play a short, bundled Kokoro sample immediately. The first Kokoro book playback downloads the approximately 92 MB quantized model from Hugging Face. Auden generates audio locally in a worker and keeps upcoming clips in memory while listening. Browser or device performance can affect the wait between clips. Kokoro highlights the active clip; device voices can also report exact word boundaries.
+**Automatic** starts by preparing Kokoro narration and can use device speech when Kokoro falls behind. **Kokoro only** uses its own local voice library. **Device speech** uses voices installed on the device. Kokoro voice previews play a short, bundled sample immediately. The first Kokoro book playback downloads the approximately 92 MB quantized model from Hugging Face.
 
 Tap a sentence or press **Listen** to begin. **Autoplay** is on by default and continues across paragraphs and pages. The player saves that position, can seek within the current Kokoro clip, and includes a sleep timer that can stop at the end of a chapter. PDF navigation uses the PDF's own bookmarks when available and recognizes printed contents pages even in older imports. Auden's light/dark switch applies across the library and reader.
 
@@ -37,13 +37,15 @@ Auden offers a guest library plus optional browser-local accounts. Use **Log in*
 
 Open **Preferences → Profile** to choose one of the twelve zodiac signs or Ophiuchus. One selection sets the built-in avatar and matching constellation banner for the browser profile.
 
-Kokoro-only playback starts with one short clip, then renders up to five sentences per group. It keeps up to three upcoming groups in memory and can render two groups at once on capable desktops. The audio clock joins prepared groups directly and trims excess silence from clip edges while keeping natural punctuation pauses. Choose **Prepare Kokoro** in Audio settings to load the model and chosen voice before listening. Synthesis can still fall behind on slower devices. **Automatic** uses device speech while the next Kokoro group is rendering. The reading highlight estimates the position from the clip time.
+Kokoro and Qwen prepare the first six sentences before starting playback. They build eight-sentence batches after that and keep a rolling target of three fully generated, decoded batches. A book or chapter stop can shorten the final batch. Auden can render smaller pieces within a batch for long sentences and dialogue cues, and joins prepared batches on the audio clock. The reading highlight estimates the active sentence from the batch time. Synthesis can still fall behind if a device renders more slowly than playback.
+
+Choose **Deep Voice**, **Bass Voice**, or **Manly Voice** in Audio settings. A voice change leaves the currently playing and buffered audio intact and applies to newly generated batches. **Prepare Kokoro** loads its model before playback.
 
 Narration adjusts delivery for explicit dialogue cues such as “she whispered” or “he shouted.” It also recognizes “chu chu” near train references and “tuk tuk” near door knocks. The original text stays visible in the reader.
 
 ## Qwen3-TTS on Apple Silicon
 
-Qwen3-TTS is an optional local narrator with Ryan and Aiden voices and support for delivery instructions. Auden uses the 1.7B CustomVoice model through MLX-Audio. It runs without a paid API and book passages stay on your Mac. The model download is about 2.3 GB.
+Qwen3-TTS is an optional local narrator with the three male profiles, Ryan and Aiden presets, and support for delivery instructions. Auden uses the 1.7B CustomVoice model through MLX-Audio. It runs without a paid API and book passages stay on your Mac. The model download is about 2.3 GB.
 
 From the repository root on an Apple Silicon Mac with Python 3.12:
 

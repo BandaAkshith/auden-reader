@@ -20,6 +20,11 @@ ORIGINS = {
 }
 MODEL = 'mlx-community/Qwen3-TTS-12Hz-1.7B-CustomVoice-4bit'
 VOICES = {'Ryan', 'Aiden'}
+VOICE_PROFILES = {
+    'Deep Voice': ('Ryan', 'Use a rich, low male register and a resonant, measured delivery.'),
+    'Bass Voice': ('Uncle_Fu', 'Speak English with a very warm, full-bodied male bass and a smooth delivery.'),
+    'Manly Voice': ('Aiden', 'Use a mature male voice with a strong, confident delivery and clear articulation.'),
+}
 DIRECTIONS = {
     'plain': 'Read naturally as an audiobook narrator, with clear diction and emotionally appropriate phrasing.',
     'quiet': 'Use a hushed, intimate delivery for the quoted dialogue, then read the narration naturally.',
@@ -48,7 +53,8 @@ def load():
 def narrate(model, text, voice, direction, speed):
     import numpy as np
 
-    instruction = DIRECTIONS[direction]
+    speaker, profile = VOICE_PROFILES.get(voice, (voice, ''))
+    instruction = f'{profile} {DIRECTIONS[direction]}'.strip()
     if speed < 0.95:
         instruction += ' Read at a relaxed pace.'
     elif speed > 1.05:
@@ -59,7 +65,7 @@ def narrate(model, text, voice, direction, speed):
         output.setsampwidth(2)
         output.setframerate(model.sample_rate)
         for result in model.generate_custom_voice(
-            text=text, speaker=voice, language='english', instruct=instruction,
+            text=text, speaker=speaker, language='english', instruct=instruction,
             max_tokens=600, temperature=0.55,
         ):
             samples = np.asarray(result.audio, dtype=np.float32).reshape(-1)
@@ -144,7 +150,8 @@ class Handler(SimpleHTTPRequestHandler):
             payload = json.loads(self.rfile.read(size))
             text, voice, direction, speed = (payload[key] for key in ('text', 'voice', 'direction', 'speed'))
             if (not isinstance(text, str) or not 0 < len(text.strip()) <= 420
-                    or voice not in VOICES or direction not in DIRECTIONS
+                    or not isinstance(voice, str) or (voice not in VOICES and voice not in VOICE_PROFILES)
+                    or direction not in DIRECTIONS
                     or type(speed) not in (int, float) or not 0.75 <= speed <= 2):
                 raise ValueError()
         except (TypeError, ValueError, KeyError, UnicodeError):

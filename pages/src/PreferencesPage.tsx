@@ -1,7 +1,7 @@
 import { ArrowLeft, BookOpen, Headphones, UserRound } from 'lucide-react'
 import { profile } from './accounts'
 import { usePreference } from './readerPreferences'
-import { naturalVoices, type NaturalVoice } from './voiceCatalog'
+import { naturalVoiceChoices, type NaturalVoiceChoice } from './voiceCatalog'
 import { ProfileAppearance, type Constellation } from './ProfileAppearance'
 import { onQwenCompanion, qwenVoices, voiceEngineLabels, voiceEngines, type QwenVoice } from './qwen'
 
@@ -26,7 +26,7 @@ export function PreferencesPage({ dark, setDark, logout, constellation, setConst
   const [spacing, setSpacing] = usePreference<number>('line-spacing', 1.65, [1.45, 1.65, 1.9, 2.2])
   const [follow, setFollow] = usePreference<boolean>('follow-narration', true)
   const [engine, setEngine] = usePreference<typeof voiceEngines[number]>('playback-engine', onQwenCompanion() ? 'qwen' : 'auto', voiceEngines)
-  const [voice, setVoice] = usePreference<NaturalVoice>('natural-voice', 'am_michael', Object.keys(naturalVoices) as NaturalVoice[])
+  const [voice, setVoice] = usePreference<NaturalVoiceChoice>('natural-voice', 'am_michael', Object.keys(naturalVoiceChoices) as NaturalVoiceChoice[])
   const [qwenVoice, setQwenVoice] = usePreference<QwenVoice>('qwen-voice', 'Ryan', qwenVoices)
   const [rate, setRate] = usePreference<number>('rate', 1, readingRates)
   const [autoplay, setAutoplay] = usePreference<boolean>('playback-autoplay', true)
@@ -52,7 +52,7 @@ export function PreferencesPage({ dark, setDark, logout, constellation, setConst
       <div className="preferences-grid">
         <label>Voice engine <select value={engine} onChange={event => setEngine(event.target.value as typeof engine)}>{voiceEngines.map(value => <option key={value} value={value}>{voiceEngineLabels[value]}</option>)}</select></label>
         {engine === 'qwen' ? <label>Qwen voice <select value={qwenVoice} onChange={event => setQwenVoice(event.target.value as QwenVoice)}>{qwenVoices.map(value => <option key={value}>{value}</option>)}</select></label>
-          : engine !== 'device' && <label>Kokoro voice <select value={voice} onChange={event => setVoice(event.target.value as NaturalVoice)}>{Object.entries(naturalVoices).map(([key, label]) => <option value={key} key={key}>{label}</option>)}</select></label>}
+          : engine !== 'device' && <label>Kokoro voice <select value={voice} onChange={event => setVoice(event.target.value as NaturalVoiceChoice)}>{Object.entries(naturalVoiceChoices).map(([key, label]) => <option value={key} key={key}>{label}</option>)}</select></label>}
         <label>Speaking speed <select value={rate} onChange={event => setRate(Number(event.target.value))}>{readingRates.map(speed => <option key={speed} value={speed}>{speed}×</option>)}</select></label>
         <label className="settings-check"><input type="checkbox" checked={autoplay} onChange={event => setAutoplay(event.target.checked)} /> Autoplay</label>
         <label className="settings-check"><input type="checkbox" checked={follow} onChange={event => setFollow(event.target.checked)} /> Follow narration</label>

@@ -1,4 +1,8 @@
-import { splitSentences } from './readingLayout'
+import { firstSentence, splitSentences } from './readingLayout'
+
+export const FIRST_BATCH_SIZE = 6
+export const SUBSEQUENT_BATCH_SIZE = 8
+export const TARGET_READY_BUFFER_BATCHES = 3
 
 export type Position = { index: number; offset: number }
 export type Clip = { point: Position; end: number; next: Position; text: string }
@@ -31,39 +35,52 @@ export function makeClip(passages: string[], point: Position): Clip | undefined 
   return { point, end, next, text: remaining.slice(0, length) }
 }
 
-export type NaturalClip = Clip & { parts: (Clip & { at: number })[]; sentences: number }
+export type NarrationBatch = Clip & { parts: (Clip & { at: number })[]; sentences: number }
 
-export function naturalClip(passages: string[], start: Position, shouldSkip: (index: number) => boolean, stopAt?: number, maximumSentences = 5, maximumCharacters = 220): NaturalClip | undefined {
-  const parts: NaturalClip['parts'] = []
+export function narrationBatch(passages: string[], start: Position, shouldSkip: (index: number) => boolean, stopAt?: number, maximumSentences = SUBSEQUENT_BATCH_SIZE): NarrationBatch | undefined {
+  const parts: NarrationBatch['parts'] = []
   let point = nextReadable(passages, start, shouldSkip)
   let text = ''
-  let sentences = 0
-  while (sentences < maximumSentences && point.index < passages.length && (stopAt === undefined || point.index < stopAt)) {
+  while (parts.length < maximumSentences && point.index < passages.length && (stopAt === undefined || point.index < stopAt)) {
     const remaining = passages[point.index].slice(point.offset)
-    const sentence = splitSentences(remaining)[0]?.text
+    const sentence = firstSentence(remaining)
     if (!sentence) break
-    const directed = deliveryFor(sentence) !== 'plain'
-    if (directed && parts.length) break
-    const capacity = maximumCharacters - text.length - Number(Boolean(text))
-    if (capacity <= 0) break
-    if (parts.length && sentence.length > capacity) break
-    let length = Math.min(sentence.length, capacity)
-    if (length < sentence.length) {
-      const boundary = sentence.slice(0, length).search(/\s+\S*$/)
-      if (boundary > capacity * .6) length = boundary + 1
-    }
-    const spoken = remaining.slice(0, length)
-    const end = point.offset + length
+    const end = point.offset + sentence.length
     const next = nextReadable(passages, { index: point.index, offset: end }, shouldSkip)
     if (text) text += ' '
-    parts.push({ point, end, next, text: spoken, at: text.length })
-    text += spoken
-    sentences++
+    parts.push({ point, end, next, text: sentence, at: text.length })
+    text += sentence
     point = next
-    if (directed) break
   }
   if (!parts.length) return
-  return { point: parts[0].point, end: parts[0].end, next: point, text, parts, sentences }
+  return { point: parts[0].point, end: parts[0].end, next: point, text, parts, sentences: parts.length }
+}
+
+// Model input can be smaller than a batch. Stitch the rendered pieces before
+// counting the batch as ready so long sentences never change its boundaries.
+export function batchUtterances<Direction extends string>(sentences: string[], maximumCharacters: number, deliveryOf: (text: string) => Direction) {
+  const utterances: { text: string; direction: Direction }[] = []
+  for (const sentence of sentences) {
+    const direction = deliveryOf(sentence)
+    let remaining = sentence.trim()
+    while (remaining) {
+      const previous = utterances.at(-1)
+      if (previous?.direction === direction && previous.text.length + 1 + remaining.length <= maximumCharacters) {
+        previous.text += ' ' + remaining
+        break
+      }
+      let end = Math.min(remaining.length, maximumCharacters)
+      if (end < remaining.length) {
+        const window = remaining.slice(0, end)
+        const boundary = window.search(/\s+\S*$/)
+        if (boundary > end * .5) end = boundary
+        else if (/[\uD800-\uDBFF]/.test(remaining[end - 1])) end--
+      }
+      utterances.push({ text: remaining.slice(0, end).trimEnd(), direction })
+      remaining = remaining.slice(end).trimStart()
+    }
+  }
+  return utterances
 }
 
 export function spokenText(text: string, context: string) {
@@ -103,7 +120,7 @@ export function trimAudioPadding(samples: Float32Array, sampleRate: number) {
     Math.min(samples.length, end + Math.round(sampleRate * .1)))
 }
 
-export function positionInClip(clip: Clip | NaturalClip, offset: number) {
+export function positionInClip(clip: Clip | NarrationBatch, offset: number) {
   const part = 'parts' in clip ? [...clip.parts].reverse().find(item => item.at <= offset) || clip.parts[0] : null
   const source = part || clip
   return { part: source, offset: Math.min(source.end - 1, source.point.offset + offset - (part?.at || 0)) }

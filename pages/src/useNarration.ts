@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
-import { delivery, deliveryFor, makeClip, naturalClip, nextReadable, positionInClip, spokenText, trimAudioPadding, type Clip, type NaturalClip, type Position } from './playbackClips'
+import { batchUtterances, delivery, deliveryFor, FIRST_BATCH_SIZE, makeClip, narrationBatch, nextReadable, positionInClip, spokenText, TARGET_READY_BUFFER_BATCHES, trimAudioPadding, type Clip, type NarrationBatch, type Position } from './playbackClips'
 import { profileKey } from './accounts'
 import { usePreference } from './readerPreferences'
-import { naturalVoices, type NaturalVoice } from './voiceCatalog'
-import { onQwenCompanion, qwenVoices, renderQwen, voiceEngines, waitForQwen, type QwenVoice } from './qwen'
+import { naturalSpeaker, naturalVoiceChoices, type NaturalVoice, type NaturalVoiceChoice } from './voiceCatalog'
+import { onQwenCompanion, qwenDirection, qwenVoices, renderQwen, voiceEngines, waitForQwen, type QwenVoice } from './qwen'
 
 export type { Position } from './playbackClips'
 type AudioData = { samples: Float32Array; sampleRate: number }
@@ -11,13 +11,14 @@ type State = 'idle' | 'loading' | 'buffering' | 'playing' | 'paused'
 type Engine = typeof voiceEngines[number]
 type Lane = 0 | 1
 type Pending = { lane: Lane; resolve: (data?: AudioData) => void; reject: (error: Error) => void; progress: (status: string) => void; timeout: number }
-type SpeechClip = Clip | NaturalClip
-type Prediction = { clip: SpeechClip; rate: number; lane: Lane; promise: Promise<AudioBuffer | null>; result?: AudioBuffer | null }
-type PlayingAudio = { buffer: AudioBuffer; offset: number; start: number; ended: () => void; progress: (seconds: number) => void; schedule: () => void }
+type SpeechClip = Clip | NarrationBatch
+type Prediction = { clip: SpeechClip; rate: number; voice: string; lane: Lane; promise: Promise<AudioBuffer | null>; result?: AudioBuffer | null }
+type PlayingAudio = { buffer: AudioBuffer; voice: string; offset: number; start: number; ended: () => void; progress: (seconds: number) => void; schedule: () => void }
 type ScheduledAudio = { job: Prediction; node: AudioBufferSourceNode; time: number }
 
 const sample = 'The lights in the reading room flickered. “Did you hear that?” Mira whispered, setting her book down.'
 const order = (a: Position, b: Position) => a.index - b.index || a.offset - b.offset
+const sameClip = (a: SpeechClip, b: SpeechClip) => order(a.point, b.point) === 0 && order(a.next, b.next) === 0
 
 function canRenderInParallel() {
   const memory = (navigator as Navigator & { deviceMemory?: number }).deviceMemory
@@ -50,19 +51,20 @@ export function useNarration(passages: string[], onPosition: (point: Position) =
   const [autoplay, setAutoplay] = usePreference<boolean>('playback-autoplay', true)
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([])
   const [voiceKey, setVoiceKey] = usePreference<string>('voice', '')
-  const [naturalVoice, setNaturalVoice] = usePreference<NaturalVoice>('natural-voice', 'am_michael', Object.keys(naturalVoices) as NaturalVoice[])
+  const [naturalVoice, setNaturalVoice] = usePreference<NaturalVoiceChoice>('natural-voice', 'am_michael', Object.keys(naturalVoiceChoices) as NaturalVoiceChoice[])
   const [qwenVoice, setQwenVoice] = usePreference<QwenVoice>('qwen-voice', 'Ryan', qwenVoices)
   const [rate, setRate] = usePreference<number>('rate', 1, [0.75, 0.8, 1, 1.15, 1.2, 1.3, 1.5, 1.75, 2])
   const [state, setState] = useState<State>('idle')
   const [speaker, setSpeaker] = useState<'device' | 'natural' | null>(null)
+  const [playingVoice, setPlayingVoice] = useState<string>()
   const [boundary, setBoundary] = useState<{ start: number; end: number } | null>(null)
   const [minutes, setMinutes] = useState(0)
   const [buffered, setBuffered] = useState(0)
   const [preparation, setPreparation] = useState<'idle' | 'preparing' | 'ready'>('idle')
   const [qwenPreparation, setQwenPreparation] = useState(false)
   const [clock, setClock] = useState({ elapsed: 0, duration: 0 })
-  const config = useRef({ autoplay, rate, onPosition, report, shouldSkip })
-  config.current = { autoplay, rate, onPosition, report, shouldSkip }
+  const config = useRef({ autoplay, rate, naturalVoice, qwenVoice, onPosition, report, shouldSkip })
+  config.current = { autoplay, rate, naturalVoice, qwenVoice, onPosition, report, shouldSkip }
   const transport = useRef<{ paused: boolean; pause: () => void; resume: () => void } | undefined>(undefined)
   const previewAudio = useRef<HTMLAudioElement | null>(null)
   const utterance = useRef<SpeechSynthesisUtterance | null>(null)
@@ -160,6 +162,7 @@ export function useNarration(passages: string[], onPosition: (point: Position) =
     setClock({ elapsed: 0, duration: 0 })
     setState('idle')
     setSpeaker(null)
+    setPlayingVoice(undefined)
     setBoundary(null)
     setBuffered(0)
   }
@@ -231,7 +234,7 @@ export function useNarration(passages: string[], onPosition: (point: Position) =
   function prepareModel(session: number, showProgress: boolean) {
     if (!warm.current) {
       setPreparation('preparing')
-      warm.current = request('prepare', session, naturalVoice, showProgress).then(() => {
+      warm.current = request('prepare', session, naturalSpeaker(config.current.naturalVoice), showProgress).then(() => {
         warmReady.current = true
         setPreparation('ready')
       }).catch(error => {
@@ -295,6 +298,7 @@ export function useNarration(passages: string[], onPosition: (point: Position) =
     if (!prepared) node.start(0, sound.offset)
     setClock({ elapsed: sound.offset, duration: sound.buffer.duration })
     setSpeaker('natural')
+    setPlayingVoice(sound.voice)
     setState('playing')
     sound.schedule()
   }
@@ -314,7 +318,7 @@ export function useNarration(passages: string[], onPosition: (point: Position) =
       synth.speak(item)
       return
     }
-    const player = new Audio(import.meta.env.BASE_URL + `voice-previews/${naturalVoice}.mp3`)
+    const player = new Audio(import.meta.env.BASE_URL + `voice-previews/${naturalSpeaker(naturalVoice)}.mp3`)
     previewAudio.current = player
     player.onended = () => { if (previewAudio.current === player) stop() }
     const failed = () => { if (previewAudio.current === player) { stop(); report('The voice preview could not load.') } }
@@ -353,13 +357,11 @@ export function useNarration(passages: string[], onPosition: (point: Position) =
     let current: SpeechClip
     let bufferQueue: Prediction[] = []
     const inFlight: [Prediction?, Prediction?] = []
-    let lookahead = 1
     let highlighted: Position | undefined
     let completed = false
     let resumeStep = () => {}
     let pauseStep = () => {}
     let paused = false
-    let usedDevice = false
 
     if (!natural && (!useDevice || !voice || !synth)) {
       config.current.report('Narration is unavailable in this browser.')
@@ -370,11 +372,11 @@ export function useNarration(passages: string[], onPosition: (point: Position) =
       void context.current.resume().catch(() => undefined)
     }
 
-    function nextClip(origin: Position, maximumSentences = 5, maximumCharacters = 220) {
+    function nextClip(origin: Position, maximumSentences?: number) {
       if (preview) return origin.index === 0 ? { point: origin, end: sample.length, next: { index: 1, offset: 0 }, text: sample } : undefined
       const next = nextReadable(passages, origin, config.current.shouldSkip)
       if (chapterStop.current !== undefined && next.index >= chapterStop.current) return
-      return natural ? naturalClip(passages, next, config.current.shouldSkip, chapterStop.current, maximumSentences, maximumCharacters) : makeClip(passages, next)
+      return natural ? narrationBatch(passages, next, config.current.shouldSkip, chapterStop.current, maximumSentences) : makeClip(passages, next)
     }
 
     function finish() {
@@ -386,61 +388,80 @@ export function useNarration(passages: string[], onPosition: (point: Position) =
     }
 
     function updateBuffer() {
-      setBuffered(bufferQueue.reduce((count, job) => count + (job.result && order(job.clip.point, current.point) > 0
-        ? ('sentences' in job.clip ? job.clip.sentences : 1) : 0), 0))
+      let next = nextClip(current.next)
+      let ready = 0
+      while (next) {
+        const clip = next
+        const job = bufferQueue.find(item => item.result && sameClip(item.clip, clip))
+        if (!job) break
+        ready++
+        next = nextClip(job.clip.next)
+      }
+      setBuffered(ready)
     }
 
     function queue(clip: SpeechClip, visible: boolean, lane: Lane = 0): Prediction {
-      const requestedRate = config.current.rate
+      const { rate: requestedRate, naturalVoice: chosenNatural, qwenVoice: chosenQwen } = config.current
       const parts = 'parts' in clip ? clip.parts : [clip]
-      const text = preview ? sample : parts.map(part => {
+      const sentences = preview ? [sample] : parts.map(part => {
         const index = part.point.index
         const nearby = passages[index].slice(Math.max(0, part.point.offset - 100), part.end + 180)
         return spokenText(part.text, nearby + ' ' + (passages[index + 1]?.slice(0, 120) || ''))
-      }).join(' ')
-      const style = delivery[deliveryFor(clip.text)]
+      })
       const job: Prediction = {
-        clip, rate: requestedRate, lane,
+        clip, rate: requestedRate, lane, voice: qwen ? chosenQwen : naturalVoiceChoices[chosenNatural],
         promise: Promise.resolve().then(async () => {
-          if (!stillHere()) return null
           const ctx = context.current!
+          const pieces: Float32Array[] = []
+          let sampleRate = 0
           if (qwenSession) {
-            const wav = await renderQwen(text, qwenVoice, requestedRate, qwenSession.signal)
-            if (!stillHere()) return null
-            const decoded = await ctx.decodeAudioData(wav)
-            return { samples: decoded.getChannelData(0), sampleRate: decoded.sampleRate }
+            for (const item of batchUtterances(sentences, 410, qwenDirection)) {
+              if (!stillHere()) return null
+              const wav = await renderQwen(item.text, chosenQwen, requestedRate, qwenSession.signal, item.direction)
+              if (!stillHere()) return null
+              const decoded = await ctx.decodeAudioData(wav)
+              sampleRate = decoded.sampleRate
+              pieces.push(trimAudioPadding(decoded.getChannelData(0), sampleRate))
+            }
+          } else {
+            for (const item of batchUtterances(sentences, 220, deliveryFor)) {
+              if (!stillHere()) return null
+              const style = delivery[item.direction]
+              const data = await request('synthesize', session, naturalSpeaker(chosenNatural), visible, item.text, requestedRate * style.pace, lane)
+              if (!data || !stillHere()) return null
+              sampleRate = data.sampleRate
+              const samples = trimAudioPadding(data.samples, sampleRate)
+              if (style.volume !== 1) {
+                for (let i = 0; i < samples.length; i++) samples[i] *= style.volume
+              }
+              pieces.push(samples)
+            }
           }
-          return request('synthesize', session, naturalVoice, visible, text, requestedRate * style.pace, lane)
-        }).then(data => {
-            if (!data || !stillHere()) return null
-            const samples = trimAudioPadding(data.samples, data.sampleRate)
-            const buffer = context.current!.createBuffer(1, samples.length, data.sampleRate)
-            const channel = buffer.getChannelData(0)
-            channel.set(samples)
-            if (!qwen && style.volume !== 1) {
-              for (let i = 0; i < channel.length; i++) channel[i] *= style.volume
-            }
-            return buffer
-          }).catch(error => {
-            if (qwen && visible && stillHere()) renderError = (error as Error).message
-            if (lane === 1 && stillHere()) {
-              parallelFailed.current = true
-              releaseWorker(new Error('Parallel rendering is unavailable.'), lane)
-            }
-            return null
-          }),
+          if (!stillHere() || !pieces.length) return null
+          const buffer = ctx.createBuffer(1, pieces.reduce((length, piece) => length + piece.length, 0), sampleRate)
+          const channel = buffer.getChannelData(0)
+          let offset = 0
+          for (const samples of pieces) {
+            channel.set(samples, offset)
+            offset += samples.length
+          }
+          return buffer
+        }).catch(error => {
+          if (qwen && visible && stillHere()) renderError = (error as Error).message
+          if (lane === 1 && stillHere()) {
+            parallelFailed.current = true
+            releaseWorker(new Error('Parallel rendering is unavailable.'), lane)
+          }
+          return null
+        }),
       }
       inFlight[lane] = job
       void job.promise.then(data => {
         job.result = data
         if (inFlight[lane] === job) inFlight[lane] = undefined
-        if (!stillHere() || !current || !bufferQueue.includes(job)) return
-        if (automatic && order(job.clip.point, current.point) <= 0 && usedDevice) {
-          bufferQueue = bufferQueue.filter(item => item !== job)
-          lookahead = Math.min(lookahead + 1, 3)
-        }
-        updateBuffer()
+        if (!stillHere() || !current) return
         if (data || lane === 1) prefetch()
+        else updateBuffer()
       })
       return job
     }
@@ -448,20 +469,23 @@ export function useNarration(passages: string[], onPosition: (point: Position) =
     function prefetch() {
       if (!stillHere() || !current || preview || !natural || modelFailed || !(qwen ? qwenReady : warmReady.current)) return
       bufferQueue = bufferQueue.filter(job => job.rate === config.current.rate &&
-        order(job.clip.point, current.point) > 0 && job.result !== null)
-      updateBuffer()
-      scheduleNext()
-      if (!config.current.autoplay || bufferQueue.length >= 3) return
+        order(job.clip.point, current.point) > 0 && job.result !== null &&
+        (chapterStop.current === undefined || ('parts' in job.clip ? job.clip.parts.at(-1)!.point.index : job.clip.point.index) < chapterStop.current))
+      // A chapter timer can change a previously planned batch boundary.
+      const planned: SpeechClip[] = []
       let candidate = nextClip(current.next)
-      for (let ahead = 1; automatic && usedDevice && candidate && ahead < lookahead; ahead++) {
+      while (candidate && planned.length < TARGET_READY_BUFFER_BATCHES) {
+        planned.push(candidate)
         candidate = nextClip(candidate.next)
       }
+      bufferQueue = bufferQueue.filter(item => planned.some(clip => sameClip(item.clip, clip)))
+      updateBuffer()
+      scheduleNext()
+      if (!config.current.autoplay || bufferQueue.length >= TARGET_READY_BUFFER_BATCHES) return
       const parallel = !qwen && !automatic && !parallelFailed.current && canRenderInParallel()
       for (const lane of parallel ? [0, 1] as const : [0] as const) {
-        if (inFlight[lane] || bufferQueue.length >= 3) continue
-        while (candidate && bufferQueue.some(item => order(item.clip.point, candidate!.point) === 0)) {
-          candidate = nextClip(candidate.next)
-        }
+        if (inFlight[lane]) continue
+        const candidate = planned.find(clip => !bufferQueue.some(item => sameClip(item.clip, clip)))
         if (candidate) bufferQueue.push(queue(candidate, false, lane))
       }
     }
@@ -472,7 +496,7 @@ export function useNarration(passages: string[], onPosition: (point: Position) =
       const playing = source.current
       const next = config.current.autoplay && nextClip(current.next)
       const job = next && bufferQueue.find(item => item.rate === config.current.rate && item.result &&
-        order(item.clip.point, next.point) === 0)
+        sameClip(item.clip, next))
       if (scheduled.current?.job === job) return
       cancelScheduled()
       if (!ctx || !sound || !playing || paused || !job || !job.result) return
@@ -513,7 +537,6 @@ export function useNarration(passages: string[], onPosition: (point: Position) =
     }
 
     function speak(clip: SpeechClip, offset = 0, allowFallback = false) {
-      usedDevice = true
       if (!synth || !voice) { stop(); report('No on-device voice is available.'); return }
       let spoken = offset
       const item = new SpeechSynthesisUtterance(clip.text.slice(offset))
@@ -553,7 +576,6 @@ export function useNarration(passages: string[], onPosition: (point: Position) =
     }
 
     function startNatural(clip: SpeechClip, job?: Prediction) {
-      usedDevice = false
       const ctx = context.current!
       const prepared = scheduled.current?.job === job && scheduled.current ? scheduled.current : undefined
       if (!prepared) {
@@ -562,13 +584,13 @@ export function useNarration(passages: string[], onPosition: (point: Position) =
       }
       pauseStep = () => {}
       resumeStep = () => setState(clip === first ? 'loading' : 'buffering')
-      function useBuffer(buffer: AudioBuffer) {
+      function useBuffer(buffer: AudioBuffer, voice: string) {
         let prior = -1
-        audio.current = { buffer, offset: 0, start: 0, ended: () => complete(clip), schedule: prefetch, progress: seconds => {
+        audio.current = { buffer, voice, offset: 0, start: 0, ended: () => complete(clip), schedule: prefetch, progress: seconds => {
           if (!('parts' in clip)) return
           const offset = Math.floor(clip.text.length * Math.min(.999, seconds / buffer.duration))
           const { part } = positionInClip(clip, offset)
-          const at = clip.parts.indexOf(part as NaturalClip['parts'][number])
+          const at = clip.parts.indexOf(part as NarrationBatch['parts'][number])
           if (at !== prior) { prior = at; highlight(clip, offset) }
         } }
         resumeStep = () => {
@@ -600,22 +622,27 @@ export function useNarration(passages: string[], onPosition: (point: Position) =
         else if (!paused) resumeStep()
         prefetch()
       }
-      if (job?.result) { useBuffer(job.result); return }
+      if (job?.result) { useBuffer(job.result, job.voice); return }
       const ready = qwenSession ? (qwenReady ? Promise.resolve() : waitForQwen(qwenSession.signal, () => {
         if (stillHere()) config.current.report('Qwen is loading on this Mac…')
       }).then(() => { qwenReady = true })) : prepareModel(session, !automatic)
+      let active = job
       void ready.then(() => {
         if (!stillHere()) return null
         if (job?.rate !== config.current.rate) {
-          const active = queue(clip, !automatic)
+          active = queue(clip, !automatic)
           prefetch()
           return active.promise
         }
-        return job.promise.then(buffer => buffer || (stillHere() && (qwen || job.lane === 1) ? queue(clip, !automatic).promise : null))
+        return job.promise.then(buffer => {
+          if (buffer || !stillHere() || (!qwen && job.lane !== 1)) return buffer
+          active = queue(clip, !automatic)
+          return active.promise
+        })
       }).then(buffer => {
         if (!stillHere()) return
-          if (!buffer) throw new Error(renderError || 'Audio could not be rendered.')
-        useBuffer(buffer)
+        if (!buffer || !active) throw new Error(renderError || 'Audio could not be rendered.')
+        useBuffer(buffer, active.voice)
       }).catch(error => {
         if (!stillHere()) return
         if (automatic) {
@@ -636,15 +663,15 @@ export function useNarration(passages: string[], onPosition: (point: Position) =
       audio.current = null
       setClock({ elapsed: 0, duration: 0 })
       highlight(clip, 0)
-      const match = bufferQueue.find(job => job.rate === config.current.rate && order(job.clip.point, clip.point) === 0)
-      bufferQueue = bufferQueue.filter(job => order(job.clip.point, clip.point) > 0 || (automatic && job === match && job.result === undefined))
+      const match = bufferQueue.find(job => job.rate === config.current.rate && sameClip(job.clip, clip))
+      bufferQueue = bufferQueue.filter(job => order(job.clip.point, clip.point) > 0)
       updateBuffer()
-      if (natural && (!automatic || match?.result)) { startNatural(clip, match); return }
+      if (natural && (!automatic || clip === first || match?.result)) { startNatural(clip, match); return }
       if (automatic) config.current.report(modelFailed ? 'Using device voice.' : warmReady.current ? 'Device voice while Kokoro buffers.' : 'Device voice while Kokoro loads.')
       speak(clip, 0, automatic && !modelFailed)
     }
 
-    const first = nextClip(preview ? { index: 0, offset: 0 } : point, natural && !automatic ? 1 : 5, natural && !automatic ? 115 : 220)
+    const first = nextClip(preview ? { index: 0, offset: 0 } : point, FIRST_BATCH_SIZE)
     if (!first) { finish(); return }
     transport.current = {
       paused: false,
@@ -655,11 +682,6 @@ export function useNarration(passages: string[], onPosition: (point: Position) =
         resumeStep()
       },
     }
-    if (automatic) void prepareModel(session, false).then(prefetch).catch(() => {
-      if (!stillHere()) return
-      modelFailed = true
-      config.current.report('Kokoro could not load. Continuing with the device voice.')
-    })
     advance(first)
   }
 
@@ -680,6 +702,6 @@ export function useNarration(passages: string[], onPosition: (point: Position) =
 
   const supported = (engine !== 'device' && Boolean(window.AudioContext)) || ((engine === 'device' || engine === 'auto') && Boolean(synth))
   return { supported, voices, voiceKey, setVoiceKey, naturalVoice, setNaturalVoice, engine, setEngine, autoplay, setAutoplay,
-    rate, setRate, state, speaker, boundary, toggle, stop, play, minutes, setSleepTimer, clock, seek, buffered,
+    rate, setRate, state, speaker, playingVoice, boundary, toggle, stop, play, minutes, setSleepTimer, clock, seek, buffered,
     preparation, prepareKokoro, qwenVoice, setQwenVoice, qwenPreparation, prepareQwen }
 }

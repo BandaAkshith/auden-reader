@@ -7,7 +7,7 @@ import ts from 'typescript'
 
 const temporary = await mkdtemp(join(tmpdir(), 'auden-reader-'))
 try {
-  for (const name of ['chapters', 'readingLayout', 'playbackClips', 'qwen']) {
+  for (const name of ['chapters', 'readingLayout', 'playbackClips', 'voiceCatalog', 'qwen']) {
     const source = await readFile(new URL(`../src/${name}.ts`, import.meta.url), 'utf8')
     const { outputText } = ts.transpileModule(source, {
       compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
@@ -16,8 +16,8 @@ try {
   }
 
   const { paginate, bookStructure } = await import(pathToFileURL(join(temporary, 'readingLayout.mjs')))
-  const { makeClip, nextReadable, naturalClip, positionInClip, spokenText, deliveryFor, trimAudioPadding } = await import(pathToFileURL(join(temporary, 'playbackClips.mjs')))
-  const { qwenDirection } = await import(pathToFileURL(join(temporary, 'qwen.mjs')))
+  const { makeClip, nextReadable, narrationBatch, batchUtterances, positionInClip, spokenText, deliveryFor, trimAudioPadding, FIRST_BATCH_SIZE, SUBSEQUENT_BATCH_SIZE, TARGET_READY_BUFFER_BATCHES } = await import(pathToFileURL(join(temporary, 'playbackClips.mjs')))
+  const { qwenDirection, qwenVoices } = await import(pathToFileURL(join(temporary, 'qwen.mjs')))
   const passages = ['Chapter 1: Arrival', 'Part I: The Harbor', 'A long line with words in it. '.repeat(90),
     'Chapter 2: Departure', 'Part II: The Coast', 'Then the ship left. '.repeat(80), 'Afterword', 'Appendix']
   const structure = bookStructure(passages)
@@ -58,22 +58,45 @@ try {
   }
   assert.equal(transcript.trim(), (segments[1] + segments[2]).trim())
   assert(clips > 2)
-  const short = ['Rain fell.', 'The lamp glowed.', 'A bell rang.', 'The ferry arrived.', 'Mira went home.', 'The fire was warm.']
-  const group = naturalClip(short, { index: 0, offset: 0 }, () => false)
-  assert.equal(group.sentences, 5)
-  const long = Array.from({ length: 5 }, () => 'Words for the voice to say, in a slow and steady rhythm, with a distinct ending.')
-  assert(naturalClip(long, { index: 0, offset: 0 }, () => false).text.length <= 220)
-  assert.equal(naturalClip(short, { index: 0, offset: 0 }, () => false, undefined, 1).sentences, 1)
-  assert.deepEqual(group.next, { index: 5, offset: 0 })
-  assert.equal(positionInClip(group, group.parts[3].at + 4).part.point.index, 3)
-  assert.equal(positionInClip(group, group.parts[3].at + 4).offset, 4)
-  assert.equal(naturalClip(short, { index: 0, offset: 0 }, () => false, 2).sentences, 2)
-  assert.equal(naturalClip(short, { index: 0, offset: 0 }, index => index === 2).parts[2].point.index, 3)
-  const first = naturalClip(long, { index: 0, offset: 0 }, () => false, undefined, 1, 45)
-  assert(first.text.length <= 45)
-  assert.equal(long[0].slice(first.next.offset), long[0].slice(first.text.length))
+  assert.equal(FIRST_BATCH_SIZE, 6)
+  assert.equal(SUBSEQUENT_BATCH_SIZE, 8)
+  assert.equal(TARGET_READY_BUFFER_BATCHES, 3)
+  const { ADDITIONAL_MALE_VOICES, VOICE_PROFILES, naturalSpeaker } = await import(pathToFileURL(join(temporary, 'voiceCatalog.mjs')))
+  assert.equal(ADDITIONAL_MALE_VOICES, 3)
+  assert.deepEqual(VOICE_PROFILES, ['Deep Voice', 'Bass Voice', 'Manly Voice'])
+  assert.deepEqual(qwenVoices.slice(0, ADDITIONAL_MALE_VOICES), VOICE_PROFILES)
+  assert.equal(new Set(VOICE_PROFILES.map(naturalSpeaker)).size, ADDITIONAL_MALE_VOICES)
+  const longSentence = 'This unusually long sentence adds several words to its clauses, '.repeat(9).trimEnd() + ' and then ends.'
+  const book = [
+    'Title to skip',
+    'Rain fell. The lamp glowed.',
+    longSentence,
+    '“Go away,” he shouted.',
+    'Mira went home. The fire was warm.',
+    ...Array.from({ length: 33 }, (_, i) => `The lighthouse flashed ${i + 1} times.`),
+  ]
+  const skipTitle = index => index === 0
+  const opening = narrationBatch(book, { index: 0, offset: 0 }, skipTitle, undefined, FIRST_BATCH_SIZE)
+  assert.equal(opening.sentences, 6)
+  assert.deepEqual(opening.next, { index: 5, offset: 0 })
+  assert.equal(opening.parts[2].text, longSentence)
+  assert.equal(positionInClip(opening, opening.parts[3].at + 4).part.point.index, 3)
+  assert.equal(positionInClip(opening, opening.parts[3].at + 4).offset, 4)
+  const tailSizes = []
+  let nextStart = opening.next
+  while (nextStart.index < book.length) {
+    const batch = narrationBatch(book, nextStart, skipTitle)
+    tailSizes.push(batch.sentences)
+    nextStart = batch.next
+    assert(tailSizes.length <= 5)
+  }
+  assert.deepEqual(tailSizes, [8, 8, 8, 8, 1])
+  assert.equal(narrationBatch(book, opening.next, skipTitle, 8).sentences, 3)
+  const utterances = batchUtterances(opening.parts.map(part => part.text), 220, deliveryFor)
+  assert(utterances.every(item => item.text.length <= 220))
+  assert.equal(utterances.map(item => item.text).join(' '), opening.parts.map(part => part.text.trim()).join(' '))
+  assert(utterances.some(item => item.direction === 'emphatic' && item.text === '“Go away,” he shouted.'))
   const dialogue = ['The hall was quiet.', '“Go away,” he shouted.', '“I miss her,” she said through tears.']
-  assert.equal(naturalClip(dialogue, { index: 0, offset: 0 }, () => false).sentences, 1)
   assert.equal(deliveryFor(dialogue[1]), 'emphatic')
   assert.equal(deliveryFor(dialogue[2]), 'sad')
   assert.equal(deliveryFor('The window snapped shut.'), 'plain')

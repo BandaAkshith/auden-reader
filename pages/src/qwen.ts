@@ -1,8 +1,9 @@
 import { deliveryFor } from './playbackClips'
+import { VOICE_PROFILES } from './voiceCatalog'
 
 export const voiceEngines = ['auto', 'natural', 'qwen', 'device'] as const
 export const voiceEngineLabels = { auto: 'Automatic', natural: 'Kokoro only', qwen: 'Qwen3-TTS (local)', device: 'Device speech' } as const
-export const qwenVoices = ['Ryan', 'Aiden'] as const
+export const qwenVoices = [...VOICE_PROFILES, 'Ryan', 'Aiden'] as const
 export type QwenVoice = typeof qwenVoices[number]
 
 export const qwenLocalUrl = 'http://127.0.0.1:8776/'
@@ -49,11 +50,11 @@ export function qwenDirection(text: string) {
   return deliveryFor(text)
 }
 
-export async function renderQwen(text: string, voice: QwenVoice, speed: number, signal: AbortSignal) {
+export async function renderQwen(text: string, voice: QwenVoice, speed: number, signal: AbortSignal, direction = qwenDirection(text)) {
   const response = await bridge('/narrate', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text, voice, direction: qwenDirection(text), speed }),
+    body: JSON.stringify({ text, voice, direction, speed }),
     signal: AbortSignal.any([signal, AbortSignal.timeout(120_000)]),
   })
   return response.arrayBuffer()
