@@ -34,6 +34,15 @@ try {
     assert.deepEqual(rebuilt, passages)
   }
 
+  const contents = Array.from({ length: 24 }, (_, index) => `Chapter ${index + 1}: A chapter title`).join(' ')
+  const withContents = ['Contents', contents, 'Chapter 1: A chapter title', 'The first chapter begins here.']
+  const printed = bookStructure(withContents)
+  const printedPages = paginate(withContents, printed, 26, 9)
+  const splitRows = printedPages.leaves.flatMap(leaf => leaf.filter(part => part.rows))
+  assert(splitRows.length > 1, 'A long table of contents should turn across several leaves')
+  assert.equal(splitRows.flatMap(({ rows }) => printed.printedPassages.get(1).slice(...rows)).length, 24)
+  assert.equal(splitRows.map(part => contents.slice(part.from, part.to)).join(''), contents)
+
   const segments = ['Contents to skip', 'The red fox ran. '.repeat(38), 'A new line.']
   const shouldSkip = index => index === 0
   let position = nextReadable(segments, { index: 0, offset: 0 }, shouldSkip)

@@ -334,7 +334,9 @@ function Reader({ book, passages, dark, toggleTheme, save, onBack }: {
   const [focused, setFocused] = useState(false)
   const [collapsed, setCollapsed] = usePreference<boolean>('compact-audio-player', true)
   const [appearance, setAppearance] = useState(false)
-  const [turn, setTurn] = useState<{ count: number; direction: 'next' | 'previous' }>({ count: 0, direction: 'next' })
+  const [turn, setTurn] = useState<{ from: number; to: number; columns: number; leaves: PageFragment[][]; forward: boolean; id: number }>()
+  const turnId = useRef(0)
+  const lastSwipe = useRef(-Infinity)
   const swipeStart = useRef<{ x: number; y: number } | undefined>(undefined)
   const [scrollTarget, setScrollTarget] = useState({ index: cursor })
   const text = useRef<HTMLDivElement>(null)
@@ -382,6 +384,13 @@ function Reader({ book, passages, dark, toggleTheme, save, onBack }: {
   const pageCount = layout === 'scroll' ? Math.ceil(passages.length / sectionSize) : Math.ceil(pages.leaves.length / pageColumns)
   const currentChapter = chapters.reduce<number | undefined>((current, [index]) => index <= cursor ? index : current, undefined)
   const nextChapter = chapters.find(([index]) => index > cursor)?.[0]
+  const pageTurn = turn?.to === page && turn.leaves === pages.leaves && turn.columns === pageColumns &&
+    layout !== 'scroll' && panel !== 'original' ? turn : undefined
+  useEffect(() => {
+    if (!turn) return
+    const timeout = window.setTimeout(() => setTurn(current => current === turn ? undefined : current), 720)
+    return () => window.clearTimeout(timeout)
+  }, [turn])
   const first = page * sectionSize
   const speakingPosition = useRef<Position | null>(null)
   const searchIndex = useMemo(() => passages.map(passage => passage.toLocaleLowerCase()), [passages])
@@ -418,14 +427,16 @@ function Reader({ book, passages, dark, toggleTheme, save, onBack }: {
     if (layout === 'scroll') jump(target * sectionSize)
     else {
       const fragment = pages.leaves[target * pageColumns][0]
-      setTurn(value => ({ count: value.count + 1, direction: target > page ? 'next' : 'previous' }))
+      if (Math.abs(target - page) === 1 && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        setTurn({ from: page, to: target, columns: pageColumns, leaves: pages.leaves, forward: target > page, id: ++turnId.current })
+      } else setTurn(undefined)
       jump(fragment.index, fragment.from)
       if (text.current && text.current.getBoundingClientRect().top < 20) text.current.scrollIntoView({ block: 'start' })
     }
   }
 
   function listenHere(index: number, offset = 0) {
-    if (window.getSelection()?.toString().trim()) return
+    if (performance.now() - lastSwipe.current < 350 || window.getSelection()?.toString().trim()) return
     narration.play({ index, offset })
   }
 
@@ -517,14 +528,14 @@ function Reader({ book, passages, dark, toggleTheme, save, onBack }: {
     setMessage('Note saved.')
   }
 
-  function renderPassage({ index, from: fragmentStart, to: fragmentEnd }: PageFragment) {
+  function renderPassage({ index, from: fragmentStart, to: fragmentEnd, rows }: PageFragment, interactive = true) {
     const passage = passages[index]
     const key = index + ':' + fragmentStart
     const tocRows = structure.printedPassages.get(index)
     if (tocRows) return <ul className="printed-contents" key={key} data-position={index}>
-      {tocRows.map((row, i) => {
+      {(rows ? tocRows.slice(...rows) : tocRows).map((row, i) => {
         const target = structure.targetFor(row)
-        return <li key={i}>{target !== undefined
+        return <li key={i}>{interactive && target !== undefined
           ? <button onClick={() => jump(target)}>{row}</button>
           : <span>{row}</span>}</li>
       })}
@@ -532,10 +543,10 @@ function Reader({ book, passages, dark, toggleTheme, save, onBack }: {
     if (index === structure.printed) return <h2 key={key} className="chapter-opening" data-position={index}>{passage}</h2>
 
     const Element = structure.opening.has(index) ? 'h2' : 'p'
-    const boundary = index === speakingPosition.current?.index ? narration.boundary : null
+    const boundary = interactive && index === speakingPosition.current?.index ? narration.boundary : null
     const current = index === cursor && fragmentStart <= position.offset && position.offset < fragmentEnd
     return <Element key={key} className={Element === 'h2' ? 'chapter-opening' : 'book-paragraph'} data-position={index} aria-current={current ? 'location' : undefined}>
-      {splitSentences(passage).flatMap(sentence => {
+      {!interactive ? passage.slice(fragmentStart, fragmentEnd) : splitSentences(passage).flatMap(sentence => {
         const from = Math.max(fragmentStart, sentence.offset)
         const to = Math.min(fragmentEnd, sentence.offset + sentence.text.length)
         if (to <= from) return []
@@ -566,13 +577,35 @@ function Reader({ book, passages, dark, toggleTheme, save, onBack }: {
     <button className="secondary compact" disabled={page + 1 >= pageCount} onClick={() => openPage(page + 1)}>Next <ChevronRight size={16} /></button>
   </nav>
 
-  function renderLeaf(number: number) {
+  function renderLeaf(number: number, interactive = true) {
     const fragments = pages.leaves[number]
     if (!fragments) return null
     return <article className="book-leaf" key={number} aria-label={`Page ${number + 1}`}>
-      <div className="leaf-content">{fragments.map(renderPassage)}</div>
+      <div className="leaf-content">{fragments.map(fragment => renderPassage(fragment, interactive))}</div>
       <div className="leaf-folio"><span>{book.title}</span><span>{number + 1}</span></div>
     </article>
+  }
+
+  function renderPageTurn() {
+    if (!pageTurn) return null
+    const { from, to, forward, id, columns } = pageTurn
+    const spread = columns === 2
+    const oldLeaf = from * columns
+    const newLeaf = to * columns
+    const cover = (number: number) => renderLeaf(number, false) || <div className="book-endpaper" />
+    const turningLeaf = spread ? oldLeaf + (forward ? 1 : 0) : forward ? oldLeaf : newLeaf
+    const behindLeaf = spread ? oldLeaf + (forward ? 0 : 1) : oldLeaf
+    const otherFace = newLeaf + (forward ? 0 : 1)
+    return <div className={`page-turn ${spread ? 'spread-turn' : 'single-turn'} ${forward ? 'turning-forward' : 'turning-back'}`}
+      key={id} aria-hidden="true" inert>
+      {(spread || !forward) && <div className="turn-underlay">{cover(behindLeaf)}</div>}
+      <div className="turn-sheet" onAnimationEnd={event => {
+        if (event.target === event.currentTarget) setTurn(current => current?.id === id ? undefined : current)
+      }}>
+        <div className="turn-face turn-front">{cover(turningLeaf)}</div>
+        {spread && <div className="turn-face turn-back">{cover(otherFace)}</div>}
+      </div>
+    </div>
   }
 
   const preparing = narration.state === 'loading' || narration.state === 'buffering'
@@ -630,7 +663,7 @@ function Reader({ book, passages, dark, toggleTheme, save, onBack }: {
       : <>
         {pageNavigation('Quick page navigation', true)}
         <div className={`reading-paper book-stage ${paper} ${typeface} ${layout === 'scroll' ? 'scroll-paper' : 'paged-paper'}`}
-          ref={text} style={{ fontSize: font, lineHeight: spacing, '--leaf-height': `${paperHeight}px`, '--leaf-width': `${leafWidth}px` } as CSSProperties}>
+          ref={text} style={{ fontSize: font, lineHeight: spacing, '--leaf-height': `${paperHeight}px` } as CSSProperties}>
           {layout === 'scroll' ? <div className="scroll-leaf">
             {passages.slice(first, first + sectionSize).map((passage, offset) => renderPassage({ index: first + offset, from: 0, to: passage.length }))}
           </div> : <div className={`book-binding ${pageColumns === 2 ? 'facing-pages' : 'single-leaf'}`}
@@ -644,17 +677,31 @@ function Reader({ book, passages, dark, toggleTheme, save, onBack }: {
               if (!start || !event.changedTouches.length || window.getSelection()?.toString().trim()) return
               const dx = event.changedTouches[0].clientX - start.x
               const dy = event.changedTouches[0].clientY - start.y
-              if (Math.abs(dx) > 55 && Math.abs(dx) > Math.abs(dy) * 1.45) openPage(page + (dx < 0 ? 1 : -1))
+              if (Math.abs(dx) > 55 && Math.abs(dx) > Math.abs(dy) * 1.45) {
+                lastSwipe.current = performance.now()
+                openPage(page + (dx < 0 ? 1 : -1))
+              }
+            }}
+            onClick={event => {
+              if (!(event.target instanceof Element) || event.target.closest('button, [role="button"], a, input') ||
+                performance.now() - lastSwipe.current < 350 || window.getSelection()?.toString().trim()) return
+              const bounds = event.currentTarget.getBoundingClientRect()
+              openPage(page + (event.clientX < bounds.left + bounds.width / 2 ? -1 : 1))
             }}>
-            <div className={`book-leaves ${turn.count ? 'turn-' + turn.direction : ''}`} key={turn.count + ':' + page}>
+            <div className="book-leaves">
               {renderLeaf(page * pageColumns)}
-              {pageColumns === 2 && renderLeaf(page * pageColumns + 1)}
+              {pageColumns === 2 && (renderLeaf(page * pageColumns + 1) || <div className="book-endpaper" aria-hidden="true" />)}
             </div>
+            {renderPageTurn()}
+            <button className="book-edge book-edge-left" aria-label="Turn left edge to previous page" disabled={page === 0}
+              onClick={() => { if (performance.now() - lastSwipe.current >= 350) openPage(page - 1) }}><ChevronLeft size={16} /></button>
+            <button className="book-edge book-edge-right" aria-label="Turn right edge to next page" disabled={page + 1 >= pageCount}
+              onClick={() => { if (performance.now() - lastSwipe.current >= 350) openPage(page + 1) }}><ChevronRight size={16} /></button>
           </div>}
         </div>
         {pageNavigation('Reader pages')}
       </>}
-    <div className="player">
+    <div className={`player ${collapsed ? '' : 'player-settings-open'}`}>
       <div className="player-main"><span className="player-icon"><Headphones size={19} /></span><div><strong>{narration.speaker === 'natural' ? 'Kokoro' : narration.speaker === 'device' ? 'Device voice' : 'Audiobook'}</strong>
         <small>{preparing ? (narration.state === 'loading' ? 'Preparing narration' : 'Buffering next clip') : `Passage ${(narration.state !== 'idle' && speakingPosition.current ? speakingPosition.current.index : cursor) + 1}`}</small></div>
         <button className="primary compact" disabled={!narration.supported} onClick={() => narration.toggle(position)}>{narration.state === 'playing' || preparing ? <Pause size={16} /> : <Play size={16} />} {actionName}</button>

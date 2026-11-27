@@ -45,7 +45,7 @@ export function bookStructure(passages: string[], importedHeadings?: number[]) {
   return { opening, printedPassages, printed, targetFor: (entry: string) => targets.get(chapterKey(entry) || '') }
 }
 
-export type PageFragment = { index: number; from: number; to: number }
+export type PageFragment = { index: number; from: number; to: number; rows?: [number, number] }
 
 export function paginate(passages: string[], structure: ReturnType<typeof bookStructure>, characters: number, lines: number) {
   const leaves: PageFragment[][] = []
@@ -85,11 +85,28 @@ export function paginate(passages: string[], structure: ReturnType<typeof bookSt
       continue
     }
     if (rows) {
-      const cost = rows.reduce((sum, row) => sum + Math.max(1, Math.ceil(row.length / characters)) + .3, 0)
-      if (hasBody && !pendingHeading && used + cost > lines) turn()
-      add(index, 0, text.length, cost)
-      hasBody = true
-      pendingHeading = false
+      let previousEnd = 0
+      const offsets = rows.map(row => {
+        const offset = Math.max(previousEnd, text.indexOf(row, previousEnd))
+        previousEnd = offset + row.length
+        return offset
+      })
+      rows.forEach((row, rowIndex) => {
+        const cost = Math.max(1, Math.ceil(row.length / characters)) + .42
+        if (hasBody && !pendingHeading && used + cost > lines) turn()
+        const last = fragments.at(-1)
+        const end = offsets[rowIndex + 1] ?? text.length
+        if (last?.index === index && last.rows) {
+          last.rows[1] = rowIndex + 1
+          last.to = end
+          used += cost
+        } else {
+          add(index, rowIndex ? offsets[rowIndex] : 0, end, cost)
+          fragments.at(-1)!.rows = [rowIndex, rowIndex + 1]
+        }
+        hasBody = true
+        pendingHeading = false
+      })
       continue
     }
 
