@@ -87,6 +87,7 @@ export function useNarration(passages: string[], onPosition: (point: Position) =
   const qwenRequest = useRef<AbortController | null>(null)
   const pending = useRef(new Map<number, Pending>())
   const aligner = useRef<ReturnType<typeof createWordAligner> | null>(null)
+  const seekWord = useRef<((point: Position) => boolean) | null>(null)
 
   useEffect(() => {
     if (!synth) return
@@ -95,6 +96,12 @@ export function useNarration(passages: string[], onPosition: (point: Position) =
     synth.addEventListener('voiceschanged', refresh)
     return () => synth.removeEventListener('voiceschanged', refresh)
   }, [synth])
+
+  useEffect(() => {
+    if (engine === 'device' || !window.AudioContext) return
+    aligner.current ??= createWordAligner()
+    aligner.current.prepare()
+  }, [engine])
 
   useEffect(() => () => {
     generation.current++
@@ -182,6 +189,7 @@ export function useNarration(passages: string[], onPosition: (point: Position) =
     qwenRequest.current = null
     setQwenPreparation(false)
     transport.current = undefined
+    seekWord.current = null
     previewAudio.current?.pause()
     previewAudio.current = null
     cancelUtterance()
@@ -381,6 +389,7 @@ export function useNarration(passages: string[], onPosition: (point: Position) =
   }
 
   function play(point: Position, preview = false) {
+    if (!preview && seekWord.current?.(point)) return
     stop()
     config.current.report('')
     const qwen = engine === 'qwen'
@@ -393,7 +402,7 @@ export function useNarration(passages: string[], onPosition: (point: Position) =
     const stillHere = () => session === generation.current
     const voice = deviceVoice()
     const natural = engine !== 'device' && Boolean(window.AudioContext)
-    const automatic = natural && engine === 'auto' && Boolean(voice)
+    const automatic = natural && !preview && Boolean(voice)
     const useDevice = engine === 'device' || automatic || (engine === 'auto' && !natural)
     let modelFailed = false
     let current: SpeechClip
@@ -434,12 +443,14 @@ export function useNarration(passages: string[], onPosition: (point: Position) =
       config.current.report(chapter ? 'Stopped at the end of the chapter.' : 'You reached the end of the book.')
     }
 
+    const canPlay = (job: Prediction) => Boolean(job.result && (!automatic || job.words.length))
+
     function updateBuffer() {
       let next = nextClip(current.next)
       let ready = 0
       while (next) {
         const clip = next
-        const job = bufferQueue.find(item => item.result && sameClip(item.clip, clip))
+        const job = bufferQueue.find(item => canPlay(item) && sameClip(item.clip, clip))
         if (!job) break
         ready++
         next = nextClip(job.clip.next)
@@ -461,13 +472,16 @@ export function useNarration(passages: string[], onPosition: (point: Position) =
         promise: Promise.resolve().then(async () => {
           const ctx = context.current!
           const pieces: Float32Array[] = []
-          const aligned: Promise<TimedWord[]>[] = []
           let sampleRate = 0
           let elapsedAudio = 0
           function add(samples: Float32Array, ranges: Parameters<typeof utteranceWords>[2]) {
             if (!preview && stillHere()) {
               aligner.current ??= createWordAligner()
-              aligned.push(aligner.current.align(samples, sampleRate, utteranceWords(original, sentences, ranges), elapsedAudio))
+              void aligner.current.align(samples, sampleRate, utteranceWords(original, sentences, ranges), elapsedAudio).then(words => {
+                if (!stillHere() || !words.length) return
+                job.words = [...job.words, ...words].sort((a, b) => a.start - b.start)
+                if (job.result && bufferQueue.includes(job)) prefetch()
+              })
             }
             pieces.push(samples)
             elapsedAudio += samples.length / sampleRate
@@ -505,9 +519,6 @@ export function useNarration(passages: string[], onPosition: (point: Position) =
             channel.set(samples, offset)
             offset += samples.length
           }
-          if (visible && aligned.length) config.current.report('Synchronizing words…')
-          job.words = (await Promise.all(aligned)).flat()
-          if (!stillHere()) return null
           return buffer
         }).catch(error => {
           if (qwen && visible && stillHere()) renderError = (error as Error).message
@@ -557,7 +568,7 @@ export function useNarration(passages: string[], onPosition: (point: Position) =
       const sound = audio.current
       const playing = source.current
       const next = config.current.autoplay && nextClip(current.next)
-      const job = next && bufferQueue.find(item => item.result && sameClip(item.clip, next))
+      const job = next && bufferQueue.find(item => canPlay(item) && sameClip(item.clip, next))
       if (scheduled.current?.job === job && scheduled.current?.rate === config.current.rate) return
       cancelScheduled()
       if (!ctx || !sound || !playing || paused || !job || !job.result) return
@@ -606,10 +617,10 @@ export function useNarration(passages: string[], onPosition: (point: Position) =
       item.pitch = style.pitch
       item.volume = style.volume
       item.onboundary = event => {
-        if (utterance.current !== item || event.name !== 'word' || event.charIndex < 0 || event.charIndex >= item.text.length) return
+        if (utterance.current !== item || event.name === 'sentence' || event.charIndex < 0 || event.charIndex >= item.text.length) return
         spoken = offset + event.charIndex
         const { part, offset: where } = positionInClip(clip, spoken)
-        const word = wordRanges(part.text).find(entry => part.point.offset + entry.start <= where && where < part.point.offset + entry.end)
+        const word = wordRanges(part.text).find(entry => where < part.point.offset + entry.end)
         trackPosition(part.point)
         setBoundary(word ? { index: part.point.index, start: part.point.offset + word.start, end: part.point.offset + word.end } : null)
       }
@@ -636,7 +647,7 @@ export function useNarration(passages: string[], onPosition: (point: Position) =
       prefetch()
     }
 
-    function startNatural(clip: SpeechClip, job?: Prediction) {
+    function startNatural(clip: SpeechClip, job?: Prediction, startOffset = 0) {
       rateStep = undefined
       const ctx = context.current!
       const prepared = scheduled.current?.job === job && scheduled.current ? scheduled.current : undefined
@@ -646,11 +657,12 @@ export function useNarration(passages: string[], onPosition: (point: Position) =
       }
       pauseStep = () => {}
       resumeStep = () => setState(clip === first ? 'loading' : 'buffering')
-      function useBuffer(buffer: AudioBuffer, { voice, words }: Prediction) {
+      function useBuffer(buffer: AudioBuffer, job: Prediction) {
+        const { voice } = job
         let prior: TimedWord | undefined
         const parts = 'parts' in clip ? clip.parts : [clip]
-        audio.current = { buffer, voice, offset: 0, start: 0, speed: 1, ended: () => complete(clip), schedule: prefetch, progress: seconds => {
-          const word = wordAt(words, seconds)
+        audio.current = { buffer, voice, offset: startOffset, start: 0, speed: 1, ended: () => complete(clip), schedule: prefetch, progress: seconds => {
+          const word = wordAt(job.words, seconds)
           if (word === prior) return
           prior = word
           if (!word) { setBoundary(null); return }
@@ -658,6 +670,29 @@ export function useNarration(passages: string[], onPosition: (point: Position) =
           trackPosition(point)
           setBoundary({ index: point.index, start: point.offset + word.from, end: point.offset + word.to })
         } }
+        seekWord.current = point => {
+          if (!stillHere() || !audio.current) return false
+          function matchWord(prediction: Prediction) {
+            const targetParts = 'parts' in prediction.clip ? prediction.clip.parts : [prediction.clip]
+            return prediction.words.find(item => {
+              const part = targetParts[item.part]
+              return part.point.index === point.index && part.point.offset + item.from === point.offset
+            })
+          }
+          const word = matchWord(job)
+          const ready = word ? null : bufferQueue.find(item => item.result && matchWord(item))
+          if (!word && !ready) return false
+          paused = false
+          if (transport.current) transport.current.paused = false
+          if (word) {
+            audio.current.offset = word.start
+            resumeStep()
+          } else {
+            stopSource()
+            advance(ready!.clip, matchWord(ready!)!.start)
+          }
+          return true
+        }
         resumeStep = () => {
           void resumeAudio(ctx).then(() => {
             if (stillHere() && !paused && current === clip && audio.current) {
@@ -722,22 +757,23 @@ export function useNarration(passages: string[], onPosition: (point: Position) =
       })
     }
 
-    function advance(clip: SpeechClip) {
+    function advance(clip: SpeechClip, startOffset = 0) {
       if (!stillHere()) return
       current = clip
       audio.current = null
+      seekWord.current = null
       setClock({ elapsed: 0, duration: 0 })
       setBoundary(null)
       trackPosition(clip.point)
       const match = bufferQueue.find(job => sameClip(job.clip, clip))
       bufferQueue = bufferQueue.filter(job => order(job.clip.point, clip.point) > 0)
       updateBuffer()
-      if (natural && (!automatic || clip === first || match?.result)) { startNatural(clip, match); return }
-      if (automatic) config.current.report(modelFailed ? 'Using device voice.' : warmReady.current ? 'Device voice while Kokoro buffers.' : 'Device voice while Kokoro loads.')
+      if (natural && (!automatic || (match && canPlay(match)))) { startNatural(clip, match, startOffset); return }
+      if (automatic) config.current.report(modelFailed ? 'Using device voice.' : `Device voice while ${qwen ? 'Qwen' : 'Kokoro'} prepares.`)
       speak(clip, 0, automatic && !modelFailed)
     }
 
-    const first = nextClip(preview ? { index: 0, offset: 0 } : point, FIRST_BATCH_SIZE)
+    const first = nextClip(preview ? { index: 0, offset: 0 } : point, natural && !automatic ? 1 : FIRST_BATCH_SIZE)
     if (!first) { finish(); return }
     transport.current = {
       paused: false,
@@ -750,6 +786,14 @@ export function useNarration(passages: string[], onPosition: (point: Position) =
       },
     }
     advance(first)
+    if (automatic) {
+      const ready = qwenSession ? waitForQwen(qwenSession.signal, () => {}).then(() => { qwenReady = true }) : prepareModel(session, false)
+      void ready.then(prefetch).catch(() => {
+        if (!stillHere()) return
+        modelFailed = true
+        config.current.report(qwen ? 'Qwen is unavailable. Playing device voice.' : 'Kokoro is unavailable. Playing device voice.')
+      })
+    }
   }
 
   function toggle(point: Position) {

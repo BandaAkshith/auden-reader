@@ -8,6 +8,11 @@ export function wordRanges(text: string): WordRange[] {
   }))
 }
 
+export function wordStartAt(text: string, column: number) {
+  const words = wordRanges(text)
+  return (words.find(word => word.end > column) ?? words.at(-1))?.start ?? 0
+}
+
 // Normalize the alphabet expected by the English acoustic model.
 const digits = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine']
 const teens = ['ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen']

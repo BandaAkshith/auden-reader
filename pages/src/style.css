@@ -545,3 +545,12 @@ progress::-webkit-progress-value { background: #557760 }
   .constellation-options label { cursor: var(--auden-action-cursor), pointer; }
   :is(textarea, input:not([type]), input:is([type="text"], [type="search"], [type="email"], [type="password"], [type="number"]), [contenteditable="true"]) { cursor: text; }
 }
+
+.reading-paper.book-stage mark {
+  background: #ffde74;
+  color: #22150d;
+  text-decoration: underline;
+  text-decoration-color: #9a6813;
+  text-underline-offset: .14em;
+  box-decoration-break: clone;
+}

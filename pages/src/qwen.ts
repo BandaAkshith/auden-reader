@@ -2,7 +2,7 @@ import { deliveryFor } from './playbackClips'
 import { VOICE_PROFILES } from './voiceCatalog'
 
 export const voiceEngines = ['auto', 'natural', 'qwen', 'device'] as const
-export const voiceEngineLabels = { auto: 'Automatic', natural: 'Kokoro only', qwen: 'Qwen3-TTS (local)', device: 'Device speech' } as const
+export const voiceEngineLabels = { auto: 'Automatic', natural: 'Kokoro', qwen: 'Qwen3-TTS (local)', device: 'Device speech' } as const
 export const qwenVoices = [...VOICE_PROFILES, 'Ryan', 'Aiden'] as const
 export type QwenVoice = typeof qwenVoices[number]
 

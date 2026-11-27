@@ -27,7 +27,7 @@ Reading insights measure time while the reader is visible, with a weekly summary
 
 ## Audiobook player
 
-**Automatic** starts by preparing Kokoro narration and can use device speech when Kokoro falls behind. **Kokoro only** uses its own local voice library. **Device speech** uses voices installed on the device. Kokoro voice previews play a short, bundled sample immediately. The first Kokoro book playback downloads the approximately 92 MB quantized model from Hugging Face.
+**Automatic**, **Kokoro**, and **Qwen** can start with an available device voice while the chosen narrator prepares. The chosen narrator joins at a batch boundary when audio is ready. **Device speech** uses voices installed on the device. Kokoro voice previews play a short, bundled sample immediately. The first Kokoro book playback downloads the approximately 92 MB quantized model from Hugging Face.
 
 Tap a sentence or press **Listen** to begin. **Autoplay** is on by default and continues across paragraphs and pages. The player saves that position, can seek within the current Kokoro clip, and includes a sleep timer that can stop at the end of a chapter. PDF navigation uses the PDF's own bookmarks when available and recognizes printed contents pages even in older imports. Auden's light/dark switch applies across the library and reader.
 
@@ -37,7 +37,7 @@ Auden offers a guest library plus optional browser-local accounts. Use **Log in*
 
 Open **Preferences → Profile** to choose one of the twelve zodiac signs or Ophiuchus. One selection sets the built-in avatar and matching constellation banner for the browser profile.
 
-Kokoro and Qwen prepare the first six sentences before starting playback. They build eight-sentence batches after that and keep a rolling target of three fully generated, decoded batches. A book or chapter stop can shorten the final batch. Auden can render smaller pieces within a batch for long sentences and dialogue cues, and joins prepared batches on the audio clock. Auden uses a local English Wav2Vec2 alignment model to synchronize individual words with generated speech. The first use downloads the approximately 95 MB alignment model. Words without reliable timestamps remain unmarked. Device speech depends on the browser's word timing events. Synthesis can still fall behind if a device renders more slowly than playback.
+Tap a word to start there. A device voice can begin reading the first six sentences while Kokoro or Qwen renders upcoming audio. Auden uses a short generated opener when a device voice is unavailable. It builds eight-sentence batches after the opening and keeps a rolling target of three fully generated, decoded batches. A book or chapter stop can shorten the final batch. Auden renders smaller pieces within a batch for long sentences and dialogue cues and joins prepared batches on the audio clock. An English Wav2Vec2 model aligns generated audio in the background. The first use downloads the approximately 95 MB alignment model. Device speech uses the browser's word timing events. Auden can jump directly to a timed word in the current or ready audio.
 
 Choose **Deep Voice**, **Bass Voice**, or **Manly Voice** in Audio settings. A voice change leaves the currently playing and buffered audio intact and applies to newly generated batches. **Prepare Kokoro** loads its model before playback.
 

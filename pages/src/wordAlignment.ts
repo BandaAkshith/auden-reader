@@ -11,7 +11,7 @@ export function utteranceWords(original: string[], spoken: string[], ranges: { p
 export function createWordAligner() {
   let worker: Worker | undefined
   let sequence = 0
-  let disabled = false
+  let retryAfter = 0
   const pending = new Map<number, { finish: (spans: (TimeSpan | null)[]) => void; timer: number }>()
 
   function close() {
@@ -22,10 +22,10 @@ export function createWordAligner() {
   }
 
   function prepare() {
-    if (worker || disabled) return
+    if (worker || Date.now() < retryAfter) return
     try {
       worker = new Worker(new URL('./alignment.worker.ts', import.meta.url), { type: 'module' })
-      worker.onerror = () => { disabled = true; close() }
+      worker.onerror = () => { retryAfter = Date.now() + 3_000; close() }
       worker.onmessage = ({ data }) => {
         const request = pending.get(data.id)
         if (request) {
@@ -33,17 +33,17 @@ export function createWordAligner() {
           window.clearTimeout(request.timer)
           request.finish(data.spans || [])
         }
-        if (data.failed) { disabled = true; close() }
+        if (data.failed && data.id === 0) { retryAfter = Date.now() + 3_000; close() }
       }
       worker.postMessage({ id: 0, samples: new Float32Array(), words: [] })
     } catch {
-      disabled = true
+      retryAfter = Date.now() + 3_000
       close()
     }
   }
 
   async function align(samples: Float32Array, sampleRate: number, words: ReturnType<typeof utteranceWords>, offset: number): Promise<TimedWord[]> {
-    if (disabled || !words.length || samples.length / sampleRate > 48) return []
+    if (!words.length || samples.length / sampleRate > 48) return []
     try {
       prepare()
       if (!worker) return []
@@ -58,14 +58,14 @@ export function createWordAligner() {
       } else audio = samples.slice()
       const id = ++sequence
       const spans = await new Promise<(TimeSpan | null)[]>(resolve => {
-        const timer = window.setTimeout(() => { disabled = true; close() }, 40_000)
+        const timer = window.setTimeout(() => { pending.delete(id); resolve([]) }, 75_000)
         pending.set(id, { finish: resolve, timer })
         worker!.postMessage({ id, samples: audio, words: words.map(word => word.text) }, [audio.buffer])
       })
       return spans.flatMap((span, index) => span && words[index]
         ? [{ ...words[index], start: span.start + offset, end: span.end + offset }] : [])
     } catch {
-      disabled = true
+      retryAfter = Date.now() + 3_000
       close()
       return []
     }

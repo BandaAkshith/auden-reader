@@ -130,9 +130,12 @@ try {
   const sharp = Float32Array.of(.99, .08, .09)
   balanceSpeech(sharp, .115)
   assert(sharp[0] <= .9801)
-  const { acousticWord, forcedWordSpans, wordAt, wordRanges } = await import(pathToFileURL(join(temporary, 'wordTiming.mjs')))
+  const { acousticWord, forcedWordSpans, wordAt, wordRanges, wordStartAt } = await import(pathToFileURL(join(temporary, 'wordTiming.mjs')))
   const { utteranceWords } = await import(pathToFileURL(join(temporary, 'wordAlignment.mjs')))
   assert.deepEqual(wordRanges('“We’re ready.”').map(word => word.text), ['We’re', 'ready'])
+  assert.equal(wordStartAt('The old ferry arrived.', 10), 8)
+  assert.equal(wordStartAt('The old ferry arrived.', 7), 8)
+  assert.equal(wordStartAt('“We’re ready.”', 14), 7)
   assert.equal(acousticWord('42'), 'FORTY|TWO')
   const signalLabels = [0, 1, 0, 1, 0, 2, 0, 3, 0]
   const emissions = Float32Array.from({ length: signalLabels.length * 4 }, (_, i) => signalLabels[i >> 2] === i % 4 ? 8 : -8)

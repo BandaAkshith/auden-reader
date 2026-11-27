@@ -7,6 +7,7 @@ import { useNarration, type Position } from './useNarration'
 import { bookStructure, paginate, splitSentences, type PageFragment } from './readingLayout'
 import { naturalVoiceChoices, type NaturalVoiceChoice } from './voiceCatalog'
 import { TARGET_READY_BUFFER_BATCHES } from './playbackClips'
+import { wordStartAt } from './wordTiming'
 import { usePreference } from './readerPreferences'
 import { AccountPage } from './AccountPage'
 import { PreferencesPage, layouts, papers, typefaces, readingRates } from './PreferencesPage'
@@ -456,6 +457,21 @@ function Reader({ book, passages, dark, toggleTheme, save, onBack }: {
     narration.play({ index, offset })
   }
 
+  function listenAtPointer(event: React.MouseEvent<HTMLElement>, index: number, from: number, text: string) {
+    if (!event.detail) { listenHere(index, from); return }
+    const root = event.currentTarget
+    const caret = document.caretPositionFromPoint?.(event.clientX, event.clientY)
+    const range = caret ? null : document.caretRangeFromPoint?.(event.clientX, event.clientY)
+    const node = caret?.offsetNode ?? range?.startContainer
+    const offset = caret?.offset ?? range?.startOffset
+    if (!node || offset === undefined || !root.contains(node)) { listenHere(index, from); return }
+    const selection = document.createRange()
+    selection.selectNodeContents(root)
+    selection.setEnd(node, offset)
+    const column = selection.toString().length
+    listenHere(index, from + wordStartAt(text, column))
+  }
+
   useEffect(() => {
     if (layout === 'scroll' || panel === 'original') return
     const onKey = (event: KeyboardEvent) => {
@@ -570,7 +586,7 @@ function Reader({ book, passages, dark, toggleTheme, save, onBack }: {
         const markStart = boundary && Math.max(from, boundary.start)
         const markEnd = boundary && Math.min(to, boundary.end)
         return <span key={from} className="read-sentence" role="button" tabIndex={0} title="Listen from here"
-          onClick={() => listenHere(index, from)}
+          onClick={event => listenAtPointer(event, index, from, displayed)}
           onKeyDown={event => {
             if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); listenHere(index, from) }
           }}>{boundary && markStart < markEnd
@@ -746,11 +762,11 @@ function Reader({ book, passages, dark, toggleTheme, save, onBack }: {
           <label><input type="checkbox" checked={follow} onChange={event => setFollow(event.target.checked)} /> Follow narration</label>
           {nextChapter !== undefined && <button className="secondary compact" onClick={() => narration.play({ index: nextChapter, offset: 0 })}><SkipForward size={15} /> Listen from next chapter</button>}
         </div>
-        {narration.engine === 'qwen' ? <p className="narration-help">Narration runs on your Mac. <a href="https://github.com/BandaAkshith/auden-reader#qwen3-tts-on-apple-silicon" target="_blank" rel="noreferrer">Qwen setup</a>
+        {narration.engine === 'qwen' ? <p className="narration-help">A device voice can start while Qwen prepares on your Mac. <a href="https://github.com/BandaAkshith/auden-reader#qwen3-tts-on-apple-silicon" target="_blank" rel="noreferrer">Qwen setup</a>
           {!onQwenCompanion() && <> · <a href={qwenLocalUrl} target="_blank" rel="noreferrer">Open local Auden</a></>}</p>
         : narration.engine !== 'device' && <p className="narration-help">{narration.engine === 'auto'
           ? 'Automatic starts with a device voice when needed and switches to Kokoro when a clip is ready.'
-          : 'Kokoro queues audio ahead and joins ready clips continuously. The first use needs a model download.'}</p>}
+          : 'A device voice can start while Kokoro prepares. Ready clips join continuously.'}</p>}
       </>}
       {narration.buffered > 0 && <div className="reader-message"><Check size={14}/> {narration.buffered} of {TARGET_READY_BUFFER_BATCHES} batches ready ahead</div>}
       {narration.speaker === 'natural' && narration.playingVoice &&
