@@ -3,7 +3,7 @@ import { profile } from './accounts'
 import { usePreference } from './readerPreferences'
 import { naturalVoices, type NaturalVoice } from './voiceCatalog'
 import { ProfileAppearance, type Constellation } from './ProfileAppearance'
-import { qwenVoices, voiceEngineLabels, voiceEngines, type QwenVoice } from './qwen'
+import { onQwenCompanion, qwenVoices, voiceEngineLabels, voiceEngines, type QwenVoice } from './qwen'
 
 export const layouts = ['single', 'spread', 'scroll'] as const
 export const papers = ['match', 'parchment', 'white', 'night', 'contrast'] as const
@@ -25,7 +25,7 @@ export function PreferencesPage({ dark, setDark, logout, constellation, setConst
   const [typeface, setTypeface] = usePreference<typeof typefaces[number]>('typeface', 'literary', typefaces)
   const [spacing, setSpacing] = usePreference<number>('line-spacing', 1.65, [1.45, 1.65, 1.9, 2.2])
   const [follow, setFollow] = usePreference<boolean>('follow-narration', true)
-  const [engine, setEngine] = usePreference<typeof voiceEngines[number]>('playback-engine', 'auto', voiceEngines)
+  const [engine, setEngine] = usePreference<typeof voiceEngines[number]>('playback-engine', onQwenCompanion() ? 'qwen' : 'auto', voiceEngines)
   const [voice, setVoice] = usePreference<NaturalVoice>('natural-voice', 'am_michael', Object.keys(naturalVoices) as NaturalVoice[])
   const [qwenVoice, setQwenVoice] = usePreference<QwenVoice>('qwen-voice', 'Ryan', qwenVoices)
   const [rate, setRate] = usePreference<number>('rate', 1, readingRates)

@@ -3,7 +3,7 @@ import { delivery, deliveryFor, makeClip, naturalClip, nextReadable, positionInC
 import { profileKey } from './accounts'
 import { usePreference } from './readerPreferences'
 import { naturalVoices, type NaturalVoice } from './voiceCatalog'
-import { qwenVoices, renderQwen, voiceEngines, waitForQwen, type QwenVoice } from './qwen'
+import { onQwenCompanion, qwenVoices, renderQwen, voiceEngines, waitForQwen, type QwenVoice } from './qwen'
 
 export type { Position } from './playbackClips'
 type AudioData = { samples: Float32Array; sampleRate: number }
@@ -38,6 +38,7 @@ function resumeAudio(context: AudioContext): Promise<void> {
 }
 
 function initialEngine(): Engine {
+  if (onQwenCompanion()) return 'qwen'
   try { if (localStorage.getItem(profileKey('engine')) === '"device"') return 'device' }
   catch { /* Fall back to automatic voices. */ }
   return 'auto'

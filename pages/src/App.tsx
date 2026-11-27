@@ -11,7 +11,7 @@ import { AccountPage } from './AccountPage'
 import { PreferencesPage, layouts, papers, typefaces, readingRates } from './PreferencesPage'
 import { profile, openLibraryAfterAccountChange, signOut } from './accounts'
 import { constellationOptions, ConstellationAvatar, type Constellation } from './ProfileAppearance'
-import { qwenVoices, voiceEngineLabels, voiceEngines, type QwenVoice } from './qwen'
+import { onQwenCompanion, qwenLocalUrl, qwenVoices, voiceEngineLabels, voiceEngines, type QwenVoice } from './qwen'
 import { dayKey, loadInsights, summarizeInsights, useReadingSession } from './insights'
 
 const OriginalPdf = lazy(() => import('./OriginalPdf'))
@@ -745,7 +745,8 @@ function Reader({ book, passages, dark, toggleTheme, save, onBack }: {
           <label><input type="checkbox" checked={follow} onChange={event => setFollow(event.target.checked)} /> Follow narration</label>
           {nextChapter !== undefined && <button className="secondary compact" onClick={() => narration.play({ index: nextChapter, offset: 0 })}><SkipForward size={15} /> Listen from next chapter</button>}
         </div>
-        {narration.engine === 'qwen' ? <p className="narration-help">Narration runs on your Mac. <a href="https://github.com/BandaAkshith/auden-reader#qwen3-tts-on-apple-silicon" target="_blank" rel="noreferrer">Qwen setup</a></p>
+        {narration.engine === 'qwen' ? <p className="narration-help">Narration runs on your Mac. <a href="https://github.com/BandaAkshith/auden-reader#qwen3-tts-on-apple-silicon" target="_blank" rel="noreferrer">Qwen setup</a>
+          {!onQwenCompanion() && <> · <a href={qwenLocalUrl} target="_blank" rel="noreferrer">Open local Auden</a></>}</p>
         : narration.engine !== 'device' && <p className="narration-help">{narration.engine === 'auto'
           ? 'Automatic starts with a device voice when needed and switches to Kokoro when a clip is ready.'
           : 'Kokoro queues audio ahead and joins ready clips continuously. The first use needs a model download.'}</p>}

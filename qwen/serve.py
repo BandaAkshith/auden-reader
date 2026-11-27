@@ -2,16 +2,20 @@
 import io
 import json
 import os
+import traceback
 from concurrent.futures import ThreadPoolExecutor
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import BoundedSemaphore
 import wave
 
 PORT = 8776
 HOST = '127.0.0.1'
+ADDRESS = f'{HOST}:{PORT}'
+DIST = Path(__file__).resolve().parent.parent / 'pages' / 'dist'
 ORIGINS = {
     'https://bandaakshith.github.io',
+    f'http://{ADDRESS}',
     *(f'http://{host}:{port}' for host in ('127.0.0.1', 'localhost') for port in (5173, 4176, 4177)),
 }
 MODEL = 'mlx-community/Qwen3-TTS-12Hz-1.7B-CustomVoice-4bit'
@@ -32,7 +36,11 @@ def load():
     from mlx_audio.tts.utils import load_model
 
     print('Loading Qwen3-TTS. The first run downloads the model weights.', flush=True)
-    result = load_model(os.environ.get('AUDEN_QWEN_MODEL', MODEL))
+    try:
+        result = load_model(os.environ.get('AUDEN_QWEN_MODEL', MODEL))
+    except Exception:
+        traceback.print_exc()
+        raise
     print('Qwen3-TTS ready.', flush=True)
     return result
 
@@ -61,13 +69,19 @@ def narrate(model, text, voice, direction, speed):
     return pcm.getvalue()
 
 
-class Handler(BaseHTTPRequestHandler):
+class Handler(SimpleHTTPRequestHandler):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, directory=str(DIST), **kwargs)
+
     def log_message(self, *_):
         pass
 
     def allowed(self):
-        return (self.headers.get('Host') == f'{HOST}:{PORT}'
+        return (self.headers.get('Host') == ADDRESS
                 and self.headers.get('Origin') in ORIGINS)
+
+    def local_health(self):
+        return self.headers.get('Host') == ADDRESS and self.headers.get('Origin') is None
 
     def respond(self, status, body=b'', content_type='application/json'):
         self.send_response(status)
@@ -91,7 +105,10 @@ class Handler(BaseHTTPRequestHandler):
         self.respond(204 if self.allowed() and self.path in ('/v1/health', '/v1/narrate') else 403)
 
     def do_GET(self):
-        if not self.allowed():
+        if not self.path.startswith('/v1/'):
+            super().do_GET()
+            return
+        if not (self.allowed() or self.local_health()):
             self.message(403, error='This origin cannot connect to Auden Qwen.')
         elif self.path != '/v1/health':
             self.message(404, error='Unknown route.')
@@ -99,6 +116,19 @@ class Handler(BaseHTTPRequestHandler):
             self.message(503, state='error', error='Qwen could not initialize. Check the companion terminal.')
         else:
             self.message(200, state='ready' if self.server.model.done() else 'loading')
+
+    def send_head(self):
+        if self.headers.get('Host') != ADDRESS:
+            self.send_error(403)
+            return None
+        path = self.path.partition('?')[0]
+        if path == '/':
+            self.path = '/index.html'
+        file = Path(self.translate_path(self.path)).resolve()
+        if not file.is_relative_to(DIST.resolve()) or not file.is_file():
+            self.send_error(404, 'Build Auden with npm run build --prefix pages to serve the local reader.')
+            return None
+        return super().send_head()
 
     def do_POST(self):
         if not self.allowed():

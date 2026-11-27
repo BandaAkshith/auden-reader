@@ -5,15 +5,17 @@ export const voiceEngineLabels = { auto: 'Automatic', natural: 'Kokoro only', qw
 export const qwenVoices = ['Ryan', 'Aiden'] as const
 export type QwenVoice = typeof qwenVoices[number]
 
-const host = 'http://127.0.0.1:8776/v1'
+export const qwenLocalUrl = 'http://127.0.0.1:8776/'
+const host = qwenLocalUrl + 'v1'
+export const onQwenCompanion = () => window.location.origin + '/' === qwenLocalUrl
 
 async function bridge(path: string, options: RequestInit) {
   let response: Response
   try {
     response = await fetch(host + path, { ...options, cache: 'no-store', credentials: 'omit', redirect: 'error' })
   } catch (error) {
-    if (options.signal?.aborted) throw error
-    throw new Error('Could not reach Auden Qwen on this Mac. Start the local companion and allow local network access if your browser asks.')
+    if (options.signal?.aborted && options.signal.reason?.name === 'AbortError') throw error
+    throw new Error('Could not reach Auden Qwen. Start the companion on this Mac, or try Open local Auden in Audio settings.')
   }
   if (!response.ok) {
     const body = await response.json().catch(() => null)
