@@ -734,7 +734,7 @@ function Reader({ book, passages, dark, toggleTheme, save, onBack }: {
         {pageNavigation('Reader pages')}
       </>}
     <div className={`player ${collapsed ? '' : 'player-settings-open'}`}>
-      <div className="player-main"><span className="player-icon"><Headphones size={19} /></span><div><strong>{narration.speaker === 'natural' ? narration.engine === 'qwen' ? 'Qwen3-TTS' : 'Kokoro' : narration.speaker === 'device' ? 'Device voice' : 'Audiobook'}</strong>
+      <div className="player-main"><span className="player-icon"><Headphones size={19} /></span><div><strong>{narration.speaker === 'device' ? 'Device voice' : narration.speaker === 'natural' || preparing ? narration.engine === 'qwen' ? 'Qwen3-TTS' : 'Kokoro' : 'Audiobook'}</strong>
         <small>{preparing ? (narration.state === 'loading' ? 'Preparing narration' : 'Buffering next clip') : `Passage ${(narration.state !== 'idle' && speakingPosition.current ? speakingPosition.current.index : cursor) + 1}`}</small></div>
         <button className="primary compact" disabled={!narration.supported} onClick={() => narration.toggle(position)}>{narration.state === 'playing' || preparing ? <Pause size={16} /> : <Play size={16} />} {actionName}</button>
         <button className="icon-button" disabled={narration.state === 'idle'} aria-label="Stop narration" onClick={() => { narration.stop(); setMessage('') }}><Square size={15} /></button>
@@ -762,11 +762,11 @@ function Reader({ book, passages, dark, toggleTheme, save, onBack }: {
           <label><input type="checkbox" checked={follow} onChange={event => setFollow(event.target.checked)} /> Follow narration</label>
           {nextChapter !== undefined && <button className="secondary compact" onClick={() => narration.play({ index: nextChapter, offset: 0 })}><SkipForward size={15} /> Listen from next chapter</button>}
         </div>
-        {narration.engine === 'qwen' ? <p className="narration-help">A device voice can start while Qwen prepares on your Mac. <a href="https://github.com/BandaAkshith/auden-reader#qwen3-tts-on-apple-silicon" target="_blank" rel="noreferrer">Qwen setup</a>
+        {narration.engine === 'qwen' ? <p className="narration-help">Qwen generates narration on your Mac. <a href="https://github.com/BandaAkshith/auden-reader#qwen3-tts-on-apple-silicon" target="_blank" rel="noreferrer">Qwen setup</a>
           {!onQwenCompanion() && <> · <a href={qwenLocalUrl} target="_blank" rel="noreferrer">Open local Auden</a></>}</p>
         : narration.engine !== 'device' && <p className="narration-help">{narration.engine === 'auto'
           ? 'Automatic starts with a device voice when needed and switches to Kokoro when a clip is ready.'
-          : 'A device voice can start while Kokoro prepares. Ready clips join continuously.'}</p>}
+          : 'Kokoro generates a short opening clip, then prepares the next clips while you listen.'}</p>}
       </>}
       {narration.buffered > 0 && <div className="reader-message"><Check size={14}/> {narration.buffered} of {TARGET_READY_BUFFER_BATCHES} batches ready ahead</div>}
       {narration.speaker === 'natural' && narration.playingVoice &&

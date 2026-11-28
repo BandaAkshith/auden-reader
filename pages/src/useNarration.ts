@@ -3,7 +3,7 @@ import { batchUtterances, delivery, deliveryFor, FIRST_BATCH_SIZE, makeClip, nar
 import { profileKey } from './accounts'
 import { usePreference } from './readerPreferences'
 import { naturalSpeaker, naturalVoiceChoices, type NaturalVoice, type NaturalVoiceChoice } from './voiceCatalog'
-import { onQwenCompanion, qwenDirection, qwenVoices, renderQwen, voiceEngines, waitForQwen, type QwenVoice } from './qwen'
+import { onQwenCompanion, permitsDeviceSpeech, qwenDirection, qwenVoices, renderQwen, voiceEngines, waitForQwen, type QwenVoice } from './qwen'
 import { balanceSpeech, stretchSpeech } from './narrationAudio'
 import { createWordAligner, utteranceWords } from './wordAlignment'
 import { wordAt, wordRanges, type TimedWord } from './wordTiming'
@@ -101,6 +101,12 @@ export function useNarration(passages: string[], onPosition: (point: Position) =
     if (engine === 'device' || !window.AudioContext) return
     aligner.current ??= createWordAligner()
     aligner.current.prepare()
+  }, [engine])
+
+  useEffect(() => {
+    if (engine !== 'natural' || !window.AudioContext) return
+    const preload = window.setTimeout(() => { void prepareModel(generation.current, false).catch(() => undefined) }, 0)
+    return () => window.clearTimeout(preload)
   }, [engine])
 
   useEffect(() => () => {
@@ -402,8 +408,8 @@ export function useNarration(passages: string[], onPosition: (point: Position) =
     const stillHere = () => session === generation.current
     const voice = deviceVoice()
     const natural = engine !== 'device' && Boolean(window.AudioContext)
-    const automatic = natural && !preview && Boolean(voice)
-    const useDevice = engine === 'device' || automatic || (engine === 'auto' && !natural)
+    const automatic = permitsDeviceSpeech(engine) && natural && !preview && Boolean(voice)
+    const useDevice = permitsDeviceSpeech(engine) && (!natural || automatic)
     let modelFailed = false
     let current: SpeechClip
     let bufferQueue: Prediction[] = []
@@ -769,7 +775,7 @@ export function useNarration(passages: string[], onPosition: (point: Position) =
       bufferQueue = bufferQueue.filter(job => order(job.clip.point, clip.point) > 0)
       updateBuffer()
       if (natural && (!automatic || (match && canPlay(match)))) { startNatural(clip, match, startOffset); return }
-      if (automatic) config.current.report(modelFailed ? 'Using device voice.' : `Device voice while ${qwen ? 'Qwen' : 'Kokoro'} prepares.`)
+      if (automatic) config.current.report(modelFailed ? 'Using device voice.' : 'Device voice while Kokoro prepares.')
       speak(clip, 0, automatic && !modelFailed)
     }
 
@@ -787,11 +793,10 @@ export function useNarration(passages: string[], onPosition: (point: Position) =
     }
     advance(first)
     if (automatic) {
-      const ready = qwenSession ? waitForQwen(qwenSession.signal, () => {}).then(() => { qwenReady = true }) : prepareModel(session, false)
-      void ready.then(prefetch).catch(() => {
+      void prepareModel(session, false).then(prefetch).catch(() => {
         if (!stillHere()) return
         modelFailed = true
-        config.current.report(qwen ? 'Qwen is unavailable. Playing device voice.' : 'Kokoro is unavailable. Playing device voice.')
+        config.current.report('Kokoro is unavailable. Playing device voice.')
       })
     }
   }
@@ -811,7 +816,7 @@ export function useNarration(passages: string[], onPosition: (point: Position) =
     else { audio.current.offset = offset; setClock({ elapsed: offset, duration: audio.current.buffer.duration }) }
   }
 
-  const supported = (engine !== 'device' && Boolean(window.AudioContext)) || ((engine === 'device' || engine === 'auto') && Boolean(synth))
+  const supported = (engine !== 'device' && Boolean(window.AudioContext)) || (permitsDeviceSpeech(engine) && Boolean(synth))
   return { supported, voices, voiceKey, setVoiceKey, naturalVoice, setNaturalVoice, engine, setEngine, autoplay, setAutoplay,
     rate, setRate, state, speaker, playingVoice, boundary, toggle, stop, play, minutes, setSleepTimer, clock, seek, buffered,
     preparation, prepareKokoro, qwenVoice, setQwenVoice, qwenPreparation, prepareQwen }

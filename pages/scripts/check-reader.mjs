@@ -17,7 +17,8 @@ try {
 
   const { paginate, bookStructure } = await import(pathToFileURL(join(temporary, 'readingLayout.mjs')))
   const { makeClip, nextReadable, narrationBatch, batchUtterances, positionInClip, spokenText, deliveryFor, trimAudioPadding, FIRST_BATCH_SIZE, SUBSEQUENT_BATCH_SIZE, TARGET_READY_BUFFER_BATCHES } = await import(pathToFileURL(join(temporary, 'playbackClips.mjs')))
-  const { qwenDirection, qwenVoices } = await import(pathToFileURL(join(temporary, 'qwen.mjs')))
+  const { permitsDeviceSpeech, qwenDirection, qwenVoices, voiceEngines } = await import(pathToFileURL(join(temporary, 'qwen.mjs')))
+  assert.deepEqual(voiceEngines.filter(permitsDeviceSpeech), ['auto', 'device'])
   const passages = ['Chapter 1: Arrival', 'Part I: The Harbor', 'A long line with words in it. '.repeat(90),
     'Chapter 2: Departure', 'Part II: The Coast', 'Then the ship left. '.repeat(80), 'Afterword', 'Appendix']
   const structure = bookStructure(passages)
