@@ -15,7 +15,7 @@ type Engine = typeof voiceEngines[number]
 type Lane = 0 | 1
 type Pending = { lane: Lane; resolve: (data?: AudioData) => void; reject: (error: Error) => void; progress: (status: string) => void; timeout: number }
 type SpeechClip = Clip | NarrationBatch
-type Prediction = { clip: SpeechClip; voice: string; lane: Lane; words: TimedWord[]; promise: Promise<AudioBuffer | null>; result?: AudioBuffer | null }
+type Prediction = { clip: SpeechClip; voice: string; lane: Lane; words: TimedWord[]; promise: Promise<AudioBuffer | null>; result?: AudioBuffer | null; error?: string }
 type PlayingAudio = { buffer: AudioBuffer; voice: string; offset: number; start: number; speed: number; ended: () => void; progress: (seconds: number) => void; schedule: () => void }
 type ScheduledAudio = { job: Prediction; node: AudioBufferSourceNode; time: number; rate: number }
 
@@ -404,7 +404,6 @@ export function useNarration(passages: string[], onPosition: (point: Position) =
     const qwenSession = qwen ? new AbortController() : null
     if (qwenSession) qwenRequest.current = qwenSession
     let qwenReady = false
-    let renderError = ''
     const stillHere = () => session === generation.current
     const voice = deviceVoice()
     const natural = engine !== 'device' && Boolean(window.AudioContext)
@@ -527,7 +526,7 @@ export function useNarration(passages: string[], onPosition: (point: Position) =
           }
           return buffer
         }).catch(error => {
-          if (qwen && visible && stillHere()) renderError = (error as Error).message
+          job.error = error instanceof Error ? error.message : 'Audio could not be rendered.'
           if (lane === 1 && stillHere()) {
             parallelFailed.current = true
             releaseWorker(new Error('Parallel rendering is unavailable.'), lane)
@@ -729,27 +728,37 @@ export function useNarration(passages: string[], onPosition: (point: Position) =
         prefetch()
       }
       if (job?.result) { useBuffer(job.result, job); return }
-      const ready = qwenSession ? (qwenReady ? Promise.resolve() : waitForQwen(qwenSession.signal, () => {
+      function prepare() { return qwenSession ? (qwenReady ? Promise.resolve() : waitForQwen(qwenSession.signal, () => {
         if (stillHere()) config.current.report('Qwen is loading on this Mac…')
-      }).then(() => { qwenReady = true })) : prepareModel(session, !automatic)
-      let active = job
-      void ready.then(() => {
-        if (!stillHere()) return null
-        if (!job) {
-          active = queue(clip, !automatic)
-          prefetch()
-          return active.promise
-        }
-        return job.promise.then(buffer => {
-          if (buffer || !stillHere() || (!qwen && job.lane !== 1)) return buffer
-          active = queue(clip, !automatic)
-          return active.promise
-        })
-      }).then(buffer => {
+      }).then(() => { qwenReady = true })) : prepareModel(session, !automatic) }
+      void (async () => {
+        await prepare()
         if (!stillHere()) return
-        if (!buffer || !active) throw new Error(renderError || 'Audio could not be rendered.')
+        let active = job ?? queue(clip, !automatic)
+        prefetch()
+        let buffer = await active.promise
+        if (!buffer && stillHere()) {
+          config.current.report('Retrying this narration clip…')
+          await prepare()
+          if (!stillHere()) return
+          active = queue(clip, !automatic)
+          buffer = await active.promise
+        }
+        if (!stillHere()) return
+        if (!buffer) throw new Error(active.error || 'Audio could not be rendered.')
+        if (clip === first && !preview && !automatic && config.current.autoplay) {
+          const next = nextClip(clip.next)
+          const upcoming = next && bufferQueue.find(item => sameClip(item.clip, next))
+          if (upcoming && upcoming.result === undefined) {
+            config.current.report('Preparing the next clip for continuous playback…')
+            let limit: number
+            await Promise.race([upcoming.promise, new Promise<void>(resolve => { limit = window.setTimeout(resolve, 8000) })])
+            window.clearTimeout(limit)
+          }
+        }
+        if (!stillHere()) return
         useBuffer(buffer, active)
-      }).catch(error => {
+      })().catch(error => {
         if (!stillHere()) return
         if (automatic) {
           modelFailed = true
@@ -757,8 +766,12 @@ export function useNarration(passages: string[], onPosition: (point: Position) =
           resumeStep = () => speak(clip)
           if (!paused) resumeStep()
         } else {
-          stop()
-          config.current.report(qwen ? (error as Error).message : 'Kokoro audio could not load. Try Automatic or Device speech.')
+          qwenReady = false
+          paused = true
+          if (transport.current) transport.current.paused = true
+          resumeStep = () => startNatural(clip, undefined, startOffset)
+          setState('paused')
+          config.current.report(`${error instanceof Error ? error.message : 'Narration could not continue.'} Press Resume to retry this passage.`)
         }
       })
     }

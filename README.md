@@ -62,3 +62,5 @@ npm run build --prefix pages
 Keep the companion running while listening. The first start downloads the model and prints **Qwen3-TTS ready** when it can generate audio. In Auden, select **Qwen3-TTS (local)** in **Audio settings**, then use **Check Qwen connection** or **Listen**. Allow local network access if your browser asks. If the browser blocks the connection from GitHub Pages, use **Open local Auden** to open the same reader directly from the companion at `http://127.0.0.1:8776/`. The local reader has its own browser library. To bring over your books, export a library ZIP from the hosted reader, then restore it in the local reader.
 
 Qwen joins ready clips using the same look-ahead player as Kokoro. Total generation time and any buffering depend on the Mac and the selected passage.
+
+Kokoro and Qwen retry a failed clip at the same reading position. At startup they briefly give the next clip time to prepare. If generation repeatedly fails, Resume retries the affected passage with the selected engine.

@@ -21,7 +21,7 @@ async function bridge(path: string, options: RequestInit) {
   }
   if (!response.ok) {
     const body = await response.json().catch(() => null)
-    throw new Error(typeof body?.error === 'string' ? body.error : 'The local Qwen companion returned an error.')
+    throw Object.assign(new Error(typeof body?.error === 'string' ? body.error : 'The local Qwen companion returned an error.'), { status: response.status })
   }
   return response
 }
@@ -52,11 +52,23 @@ export function qwenDirection(text: string) {
 }
 
 export async function renderQwen(text: string, voice: QwenVoice, signal: AbortSignal, direction = qwenDirection(text)) {
-  const response = await bridge('/narrate', {
+  const request = () => bridge('/narrate', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ text, voice, direction, speed: 1 }),
     signal: AbortSignal.any([signal, AbortSignal.timeout(120_000)]),
   })
-  return response.arrayBuffer()
+  for (const delay of [400, 1000, 2200]) {
+    try { return await (await request()).arrayBuffer() }
+    catch (error) {
+      if ((error as { status?: number }).status !== 429) throw error
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(() => { signal.removeEventListener('abort', cancel); resolve() }, delay)
+        function cancel() { clearTimeout(timer); reject(signal.reason) }
+        signal.addEventListener('abort', cancel, { once: true })
+        if (signal.aborted) cancel()
+      })
+    }
+  }
+  return (await request()).arrayBuffer()
 }

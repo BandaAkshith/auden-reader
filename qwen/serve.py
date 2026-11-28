@@ -3,6 +3,7 @@ import io
 import json
 import math
 import os
+import re
 import traceback
 from concurrent.futures import ThreadPoolExecutor
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -61,26 +62,36 @@ def narrate(model, text, voice, direction, speed):
         instruction += ' Read at a relaxed pace.'
     elif speed > 1.05:
         instruction += ' Read at a brisk pace while staying clear.'
-    estimated_words = max(len(text.split()), len(text) / 6)
-    token_limit = min(600, math.ceil(12.5 * (7 + estimated_words / 1.55)))
-    for temperature in (0.55, 0.7):
-        pcm = io.BytesIO()
-        tokens = 0
-        with wave.open(pcm, 'wb') as output:
-            output.setnchannels(1)
-            output.setsampwidth(2)
-            output.setframerate(model.sample_rate)
+    def render_piece(passage, depth=0):
+        estimated_words = max(len(passage.split()), len(passage) / 6)
+        token_limit = min(600, math.ceil(12.5 * (7 + estimated_words / 1.55)))
+        for temperature in (0.55, 0.7):
+            pcm = bytearray()
+            tokens = 0
             for result in model.generate_custom_voice(
-                text=text, speaker=speaker, language='english', instruct=instruction,
+                text=passage, speaker=speaker, language='english', instruct=instruction,
                 max_tokens=token_limit, temperature=temperature,
             ):
                 tokens += result.token_count
                 samples = np.asarray(result.audio, dtype=np.float32).reshape(-1)
-                output.writeframes((np.clip(samples, -1, 1) * 32767).astype('<i2').tobytes())
-            complete = output.getnframes() > 0 and 0 < tokens < token_limit
-        if complete:
-            return pcm.getvalue()
-    raise RuntimeError('Qwen did not complete this narration clip within its length budget.')
+                pcm.extend((np.clip(samples, -1, 1) * 32767).astype('<i2').tobytes())
+            if pcm and 0 < tokens < token_limit:
+                return pcm
+        if depth < 2:
+            midpoint = len(passage) / 2
+            breaks = [gap.start() for gap in re.finditer(r'\s+', passage) if midpoint / 2 < gap.start() < midpoint * 1.5]
+            if breaks:
+                split = min(breaks, key=lambda index: abs(index - midpoint))
+                return render_piece(passage[:split], depth + 1) + render_piece(passage[split:].lstrip(), depth + 1)
+        raise RuntimeError('Qwen did not complete this narration clip within its length budget.')
+
+    pcm = io.BytesIO()
+    with wave.open(pcm, 'wb') as output:
+        output.setnchannels(1)
+        output.setsampwidth(2)
+        output.setframerate(model.sample_rate)
+        output.writeframes(render_piece(text))
+    return pcm.getvalue()
 
 
 class Handler(SimpleHTTPRequestHandler):
